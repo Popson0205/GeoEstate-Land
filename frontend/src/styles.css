@@ -1,0 +1,91 @@
+/* Land Registry's own pieces, on top of the GeoEstate UI kit (geoestate.css). */
+.ge-page textarea { min-height: 64px; resize: vertical; }
+.ge-page input[type="checkbox"], .ge-page input[type="radio"] { width: auto; min-height: 0; accent-color: var(--ge-navy); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.loading { padding: 32px; color: var(--ge-muted); }
+.error { color: var(--ge-bad); margin: 0; }
+.ge-btn-default { }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.head h1, .head h2 { margin: 0; }
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 16px; align-items: end; }
+.form-grid .wide { grid-column: 1 / -1; }
+.two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.two > .ge-card { margin-bottom: 0; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--ge-line); border-radius: var(--ge-r); background: #fff; }
+.ge-card .table-wrap { border: 0; border-radius: 0; margin: 0 -20px; }
+.ge-table tr.is-link { cursor: pointer; } .ge-table tr.is-link:hover td { background: #f8f9fc; }
+.ge-table td input { min-height: 34px; padding: 4px 8px; }
+.empty { padding: 28px; text-align: center; color: var(--ge-muted); }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.toolbar form { flex: 1 1 260px; display: flex; gap: 8px; }
+.toolbar input, .toolbar select { font: inherit; min-height: 40px; padding: 8px 10px; border: 1px solid #c9d1de; border-radius: 8px; background: #fff; }
+.toolbar form input { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--ge-line); border-radius: 8px; overflow: hidden; background: #fff; }
+.seg button { border: 0; background: transparent; padding: 8px 14px; font: 600 14px var(--ge-font); color: var(--ge-muted); cursor: pointer; min-height: 40px; }
+.seg button[aria-pressed="true"] { background: var(--ge-navy); color: #fff; }
+.pin { font-weight: 700; color: var(--ge-navy); letter-spacing: .02em; }
+
+/* the bar's sections */
+.land-nav { display: flex; gap: 4px; margin-left: 18px; }
+.land-nav a { padding: 8px 12px; border-radius: 8px; text-decoration: none; color: var(--ge-muted); font-weight: 600; font-size: 14px; white-space: nowrap; }
+.land-nav a:hover { background: var(--ge-bg); color: var(--ge-ink); }
+.land-nav a.active { color: var(--ge-navy); background: var(--ge-navy-50); }
+.land-menu { display: none; }
+@media (max-width: 900px) {
+  .land-menu { display: inline-flex; }
+  .land-nav { display: none; position: absolute; top: 60px; left: 0; right: 0; flex-direction: column; margin: 0; padding: 8px; background: #fff; border-bottom: 1px solid var(--ge-line); box-shadow: 0 10px 20px rgba(27,43,94,.08); }
+  .land-nav.is-open { display: flex; }
+  .two { grid-template-columns: 1fr; }
+}
+
+/* numbers at the top of the register */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.stat { background: #fff; border: 1px solid var(--ge-line); border-radius: var(--ge-r); padding: 14px 16px; }
+.stat span { display: block; font-size: 13px; color: var(--ge-muted); }
+.stat strong { display: block; font-size: 24px; color: var(--ge-navy); font-variant-numeric: tabular-nums; }
+
+/* the map */
+.map { width: 100%; border-radius: var(--ge-r); overflow: hidden; border: 1px solid var(--ge-line); background: #e8ecf2; }
+.map-page .map { height: calc(100vh - 200px) !important; min-height: 420px; }
+
+/* the check's verdict */
+.verdict { border-radius: var(--ge-r); padding: 14px 16px; margin-bottom: 14px; }
+.verdict.is-ok { background: var(--ge-green-50); color: var(--ge-green-ink); }
+.verdict.is-bad { background: var(--ge-bad-50); color: var(--ge-bad); }
+.verdict strong { display: block; font-size: 16px; }
+.verdict ul { margin: 6px 0 0; padding-left: 20px; }
+.warnings { background: var(--ge-warn-50); color: var(--ge-warn); border-radius: var(--ge-r); padding: 10px 14px; margin-bottom: 14px; }
+.warnings ul { margin: 0; padding-left: 20px; }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+dl.facts dt { color: var(--ge-muted); } dl.facts dd { margin: 0; font-weight: 600; }
+.paste summary { cursor: pointer; color: var(--ge-navy-2); font-weight: 600; font-size: 14px; }
+.paste textarea { font: 13px ui-monospace, Menlo, Consolas, monospace; margin: 8px 0; min-height: 110px; }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { padding: 8px 0; border-bottom: 1px solid var(--ge-line); font-size: 14px; }
+.history li:last-child { border-bottom: 0; }
+.signed-out { max-width: 460px; margin: 10vh auto; text-align: center; }
+.signed-out img { height: 64px; margin-bottom: 12px; }
+
+.toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+.toast { background: var(--ge-ink); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 14px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.toast.is-bad { background: var(--ge-bad); }
+dialog.modal { border: 0; border-radius: 12px; padding: 20px 22px; max-width: 460px; width: calc(100% - 32px); box-shadow: 0 20px 50px rgba(27,43,94,.25); }
+dialog.modal::backdrop { background: rgba(26,34,51,.35); }
+
+/* the capture tables and forms fit any width */
+.ge-page select { max-width: 100%; text-overflow: ellipsis; }
+.two > *, .form-grid > * { min-width: 0; }
+.capture { table-layout: fixed; min-width: 420px; }
+.capture th:first-child { width: 36px; } .capture th:last-child { width: 44px; }
+.capture td { padding: 6px 8px; } .capture th { padding: 10px 8px; }
+.capture td input { width: 100%; min-width: 0; }
+.start-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.start-grid legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
+.paste textarea { display: block; width: 100%; }
+@media (max-width: 900px) { .two { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .start-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .start-grid > :first-of-type { grid-column: 1 / -1; } }
+.stack > * { min-width: 0; max-width: 100%; } .table-wrap { position: relative; }
