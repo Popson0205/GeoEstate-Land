@@ -1,4 +1,4 @@
-import type { App, AuditEntry, Check, Grid, HolderData, Home, Instrument, InstrumentKind, Kinds, Me, OrgSettings, Parcel, ParcelRow, PartyDetail, PartyIn, PartyRow, PublicResult, Register } from "./types";
+import type { App, Control, DxfRead, Workflow, AuditEntry, Check, Grid, HolderData, Home, Instrument, InstrumentKind, Kinds, Me, OrgSettings, Parcel, ParcelRow, PartyDetail, PartyIn, PartyRow, PublicResult, Register } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string, public body?: Record<string, unknown>) { super(message); }
@@ -65,6 +65,15 @@ export const api = {
   party: (id: string) => req<PartyDetail>("GET", `/parties/${id}`),
   publicRegistry: (slug: string) => req<{ name: string; shows_holders: boolean }>("GET", `/public/${encodeURIComponent(slug)}`),
   publicLookup: (slug: string, q: string) => req<PublicResult>("GET", `/public/${encodeURIComponent(slug)}/lookup?q=${encodeURIComponent(q)}`),
+  approveParcel: (id: string, note = "") => req<Parcel>("POST", `/parcels/${id}/approve`, { note }),
+  rejectParcel: (id: string, note: string) => req<Parcel>("POST", `/parcels/${id}/reject`, { note }),
+  workflow: () => req<Workflow>("GET", "/settings/workflow"),
+  saveWorkflow: (steps: Partial<Workflow>) => req<Workflow>("PUT", "/settings/workflow", { steps }),
+  control: (epsg: number) => req<Control>("GET", `/control?epsg=${epsg}`),
+  addControl: (b: { epsg: number; name: string; plan_e: number; plan_n: number; true_e: number; true_n: number; notes?: string }) => req<Control>("POST", "/control", b),
+  removeControl: (id: string) => req<Control>("DELETE", `/control/${id}`),
+  setCorrection: (epsg: number, method: string) => req<Control>("PUT", "/settings/corrections", { epsg, method }),
+  importDxf: (filename: string, content: string) => req<DxfRead>("POST", "/parcels/import/dxf", { filename, content }),
   audit: (before?: number) => req<AuditEntry[]>("GET", `/audit${before ? `?before=${before}` : ""}`),
 };
 
@@ -72,4 +81,5 @@ export interface LodgeBody {
   kind: InstrumentKind; instrument_date?: string | null; reference?: string; consideration_ngn?: number | null; details?: string;
   title_kind?: string; title_no?: string; purpose?: string; term_years?: number | null; starts_on?: string | null; ground_rent_ngn?: number | null;
   holders?: HolderData[]; party?: PartyIn; amount_ngn?: number | null; encumbrance_id?: string; register_now?: boolean;
+  cut?: [number, number][]; cut_epsg?: number | null; parcels?: string[];
 }

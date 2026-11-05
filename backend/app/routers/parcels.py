@@ -2,6 +2,8 @@
 and the organization's settings (survey grid, PIN prefix, closure, overlap tolerance)."""
 import json
 from datetime import date
+
+from psycopg.types.json import Jsonb
 from typing import Literal
 from uuid import UUID
 
@@ -140,7 +142,19 @@ async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -
             raise Problem(422, "A parcel needs at least 3 beacons.", code="validation", fields={"points": ["too few"]})
         grid_pts = [(p.x, p.y) for p in body.points]
         names = [p.beacon for p in body.points]
-    lonlat = geodesy.to_wgs84(grid_pts, epsg)
+    correction = None
+    method = (s["corrections"] or {}).get(str(epsg), "off")
+    if method != "off" and epsg != 4326:
+        try:
+            fitted = await correction_for(conn, user, epsg, method)
+        except Problem as e:
+            problems.append(f"This grid is set to be corrected to ground control, but: {e.detail}")
+            fitted = None
+        if fitted:
+            correction = fitted.summary()
+            lonlat = geodesy.to_wgs84(fitted.apply(grid_pts), epsg)
+    if not correction:
+        lonlat = geodesy.to_wgs84(grid_pts, epsg)
     b = geodesy.boundary(lonlat)
     problems += b.problems
     overlaps = []
@@ -148,8 +162,9 @@ async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -
         cur = await conn.execute(
             "SELECT id, pin, ST_Area(ST_Intersection(geom, g)::geography) AS overlap FROM parcels, "
             "  (SELECT ST_GeomFromText(%s, 4326) AS g) x "
-            "WHERE org_id = %s AND status = 'active' AND ST_Intersects(geom, g) AND (%s::uuid IS NULL OR id <> %s::uuid) "
+            "WHERE org_id = %s AND status IN ('active','pending') AND ST_Intersects(geom, g) AND (%s::uuid IS NULL OR id <> %s::uuid) "
             "ORDER BY overlap DESC", (geodesy.wkt(b.ring), user["org_id"], ignore, ignore))
+        # (pending parcels hold their land too, so two waiting for approval cannot claim the same ground)
         for r in await cur.fetchall():
             if r["overlap"] < 0.01:
                 continue                                   # sharing a boundary is not overlapping
@@ -157,7 +172,7 @@ async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -
         big = [o for o in overlaps if o["overlap_sqm"] > s["overlap_tolerance_sqm"]]
         if big:
             problems.append("It overlaps " + ", ".join(f"{o['pin']} by {o['overlap_sqm']:,} m²" for o in big)
-                            + ". A parcel cannot overlap another active parcel.")
+                            + ". A parcel cannot overlap another parcel in the fabric.")
         elif overlaps:
             warnings.append("Slivers within the tolerance touch " + ", ".join(o["pin"] for o in overlaps) + ": kept as they are.")
     beacons = [{"seq": i + 1, "name": (names[i] if i < len(names) else "") or f"B{i + 1}",
@@ -166,7 +181,8 @@ async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -
     return {"ok": not problems, "problems": problems, "warnings": warnings, "method": body.method, "epsg": epsg,
             "grid_name": geodesy.grid_name(epsg), "closure": closure, "legs": legs, "area_sqm": round(b.area_sqm, 2),
             "area_ha": round(b.area_sqm / 10000, 4), "perimeter_m": round(b.perimeter_m, 2),
-            "geometry": {"type": "Polygon", "coordinates": [[list(p) for p in b.ring]]}, "beacons": beacons, "overlaps": overlaps}
+            "geometry": {"type": "Polygon", "coordinates": [[list(p) for p in b.ring]]}, "beacons": beacons, "overlaps": overlaps,
+            "correction": correction}
 
 
 @router.post("/parcels/check", summary="Check a boundary without saving it")
@@ -174,7 +190,7 @@ async def check_parcel(body: CaptureIn, user=Depends(need("officer")), conn=Depe
     return await check(conn, user, body)
 
 
-PARCEL_SQL = ("SELECT p.id, p.pin, p.status, p.area_sqm, p.perimeter_m, p.land_use, p.address, p.locality, p.notes, p.method, "
+PARCEL_SQL = ("SELECT p.id, p.pin, p.status, p.decided_by_name, p.decided_at, p.decision_note, p.correction, p.area_sqm, p.perimeter_m, p.land_use, p.address, p.locality, p.notes, p.method, "
               "  p.source_epsg, p.closure_error_m, p.closure_ratio, p.survey_plan_no, p.surveyor, p.survey_date, p.retired_reason, "
               "  p.created_by_name, p.created_at, p.updated_at, ST_X(ST_Centroid(p.geom)) AS lon, ST_Y(ST_Centroid(p.geom)) AS lat, "
               "  (SELECT t.title_no FROM titles t WHERE t.parcel_id = p.id AND t.status = 'current') AS title_no "
@@ -194,28 +210,79 @@ async def create_parcel(body: ParcelIn, user=Depends(need("officer", write=True)
     c = await check(conn, user, body)
     if not c["ok"]:
         raise Problem(422, " ".join(c["problems"]), code="not_registrable", check=c)
+    s = await org_settings(conn, user)
+    pending = steps(s, "parcel") >= 1 and user["role"] != "registrar"      # a registrar's own parcels need no one else
+    pid, pin = await insert_parcel(conn, user, c["geometry"]["coordinates"][0], c["area_sqm"], c["perimeter_m"], c["beacons"],
+                                   status="pending" if pending else "active", method=c["method"], source_epsg=c["epsg"],
+                                   closure_error_m=(c["closure"] or {}).get("misclosure_m"), closure_ratio=(c["closure"] or {}).get("ratio"),
+                                   correction=c["correction"], land_use=body.land_use.strip(), address=body.address.strip(),
+                                   locality=body.locality.strip(), notes=body.notes.strip(), survey_plan_no=body.survey_plan_no.strip(),
+                                   surveyor=body.surveyor.strip(), survey_date=body.survey_date)
+    await audit(conn, user, "parcel.create", "parcel", pid, pin=pin, area_sqm=c["area_sqm"], method=c["method"],
+                pending=True if pending else None)
+    return await get_parcel(pid, user, conn)
+
+
+def steps(s: dict, kind: str) -> int:
+    """How many registrars approve this kind of change in this organization's workflow."""
+    return int((s.get("workflow") or {}).get(kind, 0 if kind == "parcel" else 1))
+
+
+async def insert_parcel(conn, user, ring, area_sqm, perimeter_m, beacons, *, status="active", method, source_epsg, **fields) -> tuple:
+    """A new parcel with the next PIN, and its beacons."""
     cur = await conn.execute("UPDATE settings SET pin_next = pin_next + 1 WHERE org_id = %s RETURNING pin_prefix, pin_next - 1 AS n",
                              (user["org_id"],))
     s = await cur.fetchone()
     pin = f"{s['pin_prefix']}-{s['n']:06d}"
-    ring = [tuple(p) for p in c["geometry"]["coordinates"][0]]
+    cols = {"land_use": "", "address": "", "locality": "", "notes": "", "survey_plan_no": "", "surveyor": "", "survey_date": None,
+            "closure_error_m": None, "closure_ratio": None, "correction": None} | fields
+    if cols["correction"] is not None:
+        cols["correction"] = Jsonb(cols["correction"])
+    names = ", ".join(cols)
     cur = await conn.execute(
-        "INSERT INTO parcels (org_id, pin, geom, area_sqm, perimeter_m, land_use, address, locality, notes, method, source_epsg, "
-        "  closure_error_m, closure_ratio, survey_plan_no, surveyor, survey_date, created_by, created_by_name) "
-        "VALUES (%s, %s, ST_GeomFromText(%s, 4326), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-        (user["org_id"], pin, geodesy.wkt(ring), c["area_sqm"], c["perimeter_m"], body.land_use.strip(), body.address.strip(),
-         body.locality.strip(), body.notes.strip(), c["method"], c["epsg"], (c["closure"] or {}).get("misclosure_m"),
-         (c["closure"] or {}).get("ratio"), body.survey_plan_no.strip(), body.surveyor.strip(), body.survey_date, user["id"], user["name"]))
+        f"INSERT INTO parcels (org_id, pin, geom, area_sqm, perimeter_m, status, method, source_epsg, created_by, created_by_name, {names}) "
+        f"VALUES (%s, %s, ST_GeomFromText(%s, 4326), %s, %s, %s, %s, %s, %s, %s, {', '.join(['%s'] * len(cols))}) RETURNING id",
+        (user["org_id"], pin, geodesy.wkt([tuple(p) for p in ring]), area_sqm, perimeter_m, status, method, source_epsg, user["id"], user["name"],
+         *cols.values()))
     pid = (await cur.fetchone())["id"]
-    for b in c["beacons"]:
+    for b in beacons:
         await conn.execute("INSERT INTO beacons (parcel_id, seq, name, easting, northing, lon, lat) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                            (pid, b["seq"], b["name"], b["easting"], b["northing"], b["lon"], b["lat"]))
-    await audit(conn, user, "parcel.create", "parcel", pid, pin=pin, area_sqm=c["area_sqm"], method=c["method"])
-    return await get_parcel(pid, user, conn)
+    return pid, pin
+
+
+class Decision(BaseModel):
+    note: str = Field("", max_length=2000)
+
+
+@router.post("/parcels/{parcel_id}/approve", summary="Approve a parcel waiting in the workflow (registrars): it joins the fabric")
+async def approve_parcel(parcel_id: UUID, body: Decision, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
+    return await _decide_parcel(conn, user, parcel_id, "active", body.note)
+
+
+@router.post("/parcels/{parcel_id}/reject", summary="Reject a parcel waiting in the workflow, with the reason (registrars)")
+async def reject_parcel(parcel_id: UUID, body: Decision, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
+    if len(body.note.strip()) < 3:
+        raise Problem(422, "Say why it is rejected: whoever captured it will see this.", code="validation", fields={"note": ["missing"]})
+    return await _decide_parcel(conn, user, parcel_id, "rejected", body.note)
+
+
+async def _decide_parcel(conn, user, parcel_id, status, note):
+    cur = await conn.execute("UPDATE parcels SET status = %s, decided_by_name = %s, decided_at = now(), decision_note = %s, updated_at = now() "
+                             "WHERE id = %s AND org_id = %s AND status = 'pending' RETURNING pin", (status, user["name"], note.strip(), parcel_id, user["org_id"]))
+    row = await cur.fetchone()
+    if not row:
+        p = await get_parcel(parcel_id, user, conn)
+        raise Problem(409, f"{p['pin']} is not waiting for a decision.", code="decided")
+    await conn.execute("INSERT INTO approvals (target_type, target_id, by_id, by_name, note) VALUES ('parcel', %s, %s, %s, %s) "
+                       "ON CONFLICT DO NOTHING", (parcel_id, user["id"], user["name"], note.strip()))
+    await audit(conn, user, "parcel.approve" if status == "active" else "parcel.reject", "parcel", parcel_id, pin=row["pin"],
+                note=note.strip() or None)
+    return await get_parcel(parcel_id, user, conn)
 
 
 @router.get("/parcels", summary="The register: search by PIN, address, locality, survey plan or surveyor")
-async def list_parcels(q: str | None = None, status: str | None = Query("active", pattern="^(active|retired|all)$"),
+async def list_parcels(q: str | None = None, status: str | None = Query("active", pattern="^(active|pending|retired|rejected|all)$"),
                        limit: int = Query(200, ge=1, le=1000), user=Depends(need()), conn=Depends(get_conn)):
     where, params = ["p.org_id = %s"], [user["org_id"]]
     if status != "all":
@@ -232,17 +299,17 @@ async def list_parcels(q: str | None = None, status: str | None = Query("active"
 
 @router.get("/parcels.geojson", summary="The fabric for the map, within a box (west,south,east,north)")
 async def fabric(bbox: str | None = None, user=Depends(need()), conn=Depends(get_conn)):
-    where, params = ["org_id = %s", "status = 'active'"], [user["org_id"]]
+    where, params = ["org_id = %s", "status IN ('active','pending')"], [user["org_id"]]
     if bbox:
         try:
             w, s_, e, n = (float(x) for x in bbox.split(","))
         except ValueError:
             raise Problem(422, "bbox is west,south,east,north.", code="validation")
         where.append("geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)"); params += [w, s_, e, n]
-    cur = await conn.execute(f"SELECT id, pin, area_sqm, land_use, ST_AsGeoJSON(geom, 8) AS g FROM parcels WHERE {' AND '.join(where)} "
+    cur = await conn.execute(f"SELECT id, pin, status, area_sqm, land_use, ST_AsGeoJSON(geom, 8) AS g FROM parcels WHERE {' AND '.join(where)} "
                              "LIMIT 20000", params)
     feats = [{"type": "Feature", "id": str(r["id"]), "geometry": json.loads(r["g"]),
-              "properties": {"id": str(r["id"]), "pin": r["pin"], "area_sqm": float(r["area_sqm"]), "land_use": r["land_use"]}}
+              "properties": {"id": str(r["id"]), "pin": r["pin"], "status": r["status"], "area_sqm": float(r["area_sqm"]), "land_use": r["land_use"]}}
              for r in await cur.fetchall()]
     cur = await conn.execute("SELECT ST_XMin(e) AS w, ST_YMin(e) AS s, ST_XMax(e) AS e, ST_YMax(e) AS n FROM "
                              "(SELECT ST_Extent(geom) AS e FROM parcels WHERE org_id = %s AND status = 'active') x", (user["org_id"],))
@@ -268,6 +335,13 @@ async def get_parcel(parcel_id: UUID, user=Depends(need()), conn=Depends(get_con
     cur = await conn.execute("SELECT at, actor_name, action, details FROM audit_log WHERE org_id = %s AND target_type = 'parcel' "
                              "AND target_id = %s ORDER BY id DESC LIMIT 100", (user["org_id"], str(parcel_id)))
     p["history"] = await cur.fetchall()
+    cur = await conn.execute("SELECT 'parent' AS rel, l.parent_id AS id, x.pin, i.number, i.kind FROM lineage l JOIN parcels x ON x.id = l.parent_id "
+                             "JOIN instruments i ON i.id = l.instrument_id WHERE l.child_id = %s UNION ALL "
+                             "SELECT 'child', l.child_id, x.pin, i.number, i.kind FROM lineage l JOIN parcels x ON x.id = l.child_id "
+                             "JOIN instruments i ON i.id = l.instrument_id WHERE l.parent_id = %s ORDER BY 3", (parcel_id, parcel_id))
+    lin = await cur.fetchall()
+    p["parents"] = [r for r in lin if r["rel"] == "parent"]
+    p["children"] = [r for r in lin if r["rel"] == "child"]
     return p
 
 
@@ -302,8 +376,8 @@ class RetireIn(BaseModel):
 @router.post("/parcels/{parcel_id}/retire", summary="Retire a parcel (registrars): it leaves the fabric, its record stays")
 async def retire(parcel_id: UUID, body: RetireIn, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
     p = await get_parcel(parcel_id, user, conn)
-    if p["status"] == "retired":
-        raise Problem(409, f"{p['pin']} is already retired.", code="retired")
+    if p["status"] != "active":
+        raise Problem(409, f"{p['pin']} is {p['status']}: only an active parcel can be retired.", code="not_active")
     cur = await conn.execute("SELECT (SELECT title_no FROM titles WHERE parcel_id = %s AND status = 'current') AS title, "
                              "(SELECT count(*) FROM instruments WHERE parcel_id = %s AND status = 'lodged') AS lodged", (parcel_id, parcel_id))
     r = await cur.fetchone()
@@ -322,6 +396,7 @@ async def home(user=Depends(need()), conn=Depends(get_conn)):
     cur = await conn.execute("SELECT count(*) FILTER (WHERE status = 'active') AS active, count(*) FILTER (WHERE status = 'retired') AS retired, "
                              "COALESCE(sum(area_sqm) FILTER (WHERE status = 'active'), 0) AS area_sqm, "
                              "count(*) FILTER (WHERE created_at > date_trunc('month', now())) AS this_month, "
+                             "count(*) FILTER (WHERE status = 'pending') AS pending, "
                              "(SELECT count(*) FROM titles t WHERE t.org_id = %s AND t.status = 'current') AS titled, "
                              "(SELECT count(*) FROM instruments i WHERE i.org_id = %s AND i.status = 'lodged') AS lodged "
                              "FROM parcels WHERE org_id = %s",
@@ -337,3 +412,122 @@ async def audit_log(before: int | None = None, user=Depends(need("registrar")), 
     cur = await conn.execute("SELECT id, at, actor_name, action, target_type, target_id, details FROM audit_log WHERE org_id = %s "
                              "AND (%s::bigint IS NULL OR id < %s) ORDER BY id DESC LIMIT 100", (user["org_id"], before, before))
     return await cur.fetchall()
+
+
+# ---------- the organization's workflow ----------
+WORKFLOW_KINDS = ("parcel", "grant", "transfer", "mortgage", "caveat", "lease", "discharge", "revocation", "subdivision", "amalgamation")
+
+
+class WorkflowIn(BaseModel):
+    steps: dict[Literal["parcel", "grant", "transfer", "mortgage", "caveat", "lease", "discharge", "revocation", "subdivision", "amalgamation"],
+                int] = Field(description="Registrars who approve each kind: 0, 1 or 2 (a new parcel: 0 or 1)")
+
+
+@router.get("/settings/workflow", summary="How many registrars approve each kind of change")
+async def get_workflow(user=Depends(need()), conn=Depends(get_conn)):
+    s = await org_settings(conn, user)
+    return {k: steps(s, k) for k in WORKFLOW_KINDS}
+
+
+@router.put("/settings/workflow", summary="Set the organization's workflow (registrars)")
+async def put_workflow(body: WorkflowIn, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
+    for k, v in body.steps.items():
+        if v not in ((0, 1) if k == "parcel" else (0, 1, 2)):
+            raise Problem(422, f"{k}: {'0 or 1' if k == 'parcel' else '0, 1 or 2'} approvals.", code="validation", fields={k: ["out of range"]})
+    s = await org_settings(conn, user)
+    w = {k: steps(s, k) for k in WORKFLOW_KINDS} | body.steps
+    await conn.execute("UPDATE settings SET workflow = %s, updated_at = now() WHERE org_id = %s", (Jsonb(w), user["org_id"]))
+    await audit(conn, user, "settings.workflow", **{k: v for k, v in body.steps.items()})
+    return w
+
+
+# ---------- ground control ----------
+async def correction_for(conn, user, epsg: int, method: str):
+    cur = await conn.execute("SELECT name, plan_e, plan_n, true_e, true_n FROM control_points WHERE org_id = %s AND epsg = %s ORDER BY name",
+                             (user["org_id"], epsg))
+    return geodesy.fit(method, await cur.fetchall())
+
+
+class ControlIn(BaseModel):
+    epsg: int
+    name: str = Field(min_length=1, max_length=60)
+    plan_e: float
+    plan_n: float
+    true_e: float
+    true_n: float
+    notes: str = Field("", max_length=500)
+
+
+@router.get("/control", summary="Ground control points on a grid, and the corrections they give")
+async def list_control(epsg: int, user=Depends(need()), conn=Depends(get_conn)):
+    s = await org_settings(conn, user)
+    cur = await conn.execute("SELECT id, epsg, name, plan_e, plan_n, true_e, true_n, notes, created_at FROM control_points "
+                             "WHERE org_id = %s AND epsg = %s ORDER BY name", (user["org_id"], epsg))
+    pts = await cur.fetchall()
+    fits = {}
+    for m in geodesy.MIN_POINTS:
+        try:
+            f = geodesy.fit(m, pts)
+            fits[m] = {**f.summary(), "residuals": f.residuals}
+        except Problem as e:
+            fits[m] = {"method": m, "method_name": geodesy.METHOD_NAME[m], "error": e.detail}
+    return {"epsg": epsg, "grid_name": geodesy.grid_name(epsg), "method": (s["corrections"] or {}).get(str(epsg), "off"),
+            "points": pts, "fits": fits}
+
+
+@router.post("/control", status_code=201, summary="Add a ground control point (registrars)")
+async def add_control(body: ControlIn, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
+    if body.epsg not in geodesy.GRIDS or body.epsg == 4326:
+        raise Problem(422, "Ground control is for a projected survey grid.", code="validation", fields={"epsg": ["not a survey grid"]})
+    if abs(body.plan_e - body.true_e) > 2000 or abs(body.plan_n - body.true_n) > 2000:
+        raise Problem(422, "The plan and true positions are more than 2 km apart: check that both are on the same grid.", code="validation")
+    await org_settings(conn, user)
+    cur = await conn.execute("INSERT INTO control_points (org_id, epsg, name, plan_e, plan_n, true_e, true_n, notes) "
+                             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (org_id, epsg, name) DO NOTHING RETURNING id",
+                             (user["org_id"], body.epsg, body.name.strip(), body.plan_e, body.plan_n, body.true_e, body.true_n, body.notes.strip()))
+    if not await cur.fetchone():
+        raise Problem(409, f"There is already a control point called {body.name.strip()} on this grid.", code="duplicate")
+    await audit(conn, user, "control.add", epsg=body.epsg, name=body.name.strip())
+    return await list_control(body.epsg, user, conn)
+
+
+@router.delete("/control/{cid}", summary="Remove a ground control point (registrars)")
+async def delete_control(cid: UUID, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
+    cur = await conn.execute("DELETE FROM control_points WHERE id = %s AND org_id = %s RETURNING epsg, name", (cid, user["org_id"]))
+    row = await cur.fetchone()
+    if not row:
+        raise Problem(404, "Control point not found.", code="not_found")
+    await audit(conn, user, "control.remove", epsg=row["epsg"], name=row["name"])
+    return await list_control(row["epsg"], user, conn)
+
+
+class CorrectionIn(BaseModel):
+    epsg: int
+    method: Literal["off", "shift", "helmert", "affine"]
+
+
+@router.put("/settings/corrections", summary="Correct a grid's plans to ground control from now on (registrars)")
+async def put_correction(body: CorrectionIn, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
+    if body.method != "off":
+        await correction_for(conn, user, body.epsg, body.method)       # refuses when there are too few points
+    await org_settings(conn, user)
+    await conn.execute("UPDATE settings SET corrections = corrections || jsonb_build_object(%s::text, %s::text), updated_at = now() "
+                       "WHERE org_id = %s", (str(body.epsg), body.method, user["org_id"]))
+    await audit(conn, user, "settings.correction", epsg=body.epsg, method=body.method)
+    return await list_control(body.epsg, user, conn)
+
+
+# ---------- importing a survey drawing ----------
+class DxfIn(BaseModel):
+    filename: str = Field("", max_length=200)
+    content: str = Field(max_length=15_000_000, description="The DXF file's text")
+
+
+@router.post("/parcels/import/dxf", summary="Read the closed boundaries out of a DXF drawing (nothing is saved)")
+async def import_dxf(body: DxfIn, user=Depends(need("officer"))):
+    import anyio
+    from .. import dxf
+    out = await anyio.to_thread.run_sync(dxf.read, body.content)
+    if not out["shapes"]:
+        raise Problem(422, "No closed boundaries were found in this drawing. Parcels must be closed polylines.", code="no_shapes")
+    return {"filename": body.filename, **out}

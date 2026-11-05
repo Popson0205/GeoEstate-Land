@@ -129,3 +129,9 @@ input.share { width: 90px; min-height: 34px; padding: 4px 8px; border: 1px solid
   .ge-bar, .ge-notice, .no-print, .toasts { display: none !important; }
   .ge-page { background: #fff; } .ge-main { padding: 0; max-width: none; } .extract { border: 0; padding: 0; }
 }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--ge-line); background: #fff; border-radius: 999px; padding: 4px 12px; font: 500 13px var(--ge-font); cursor: pointer; min-height: 32px; }
+.chip:hover { border-color: var(--ge-navy); }
+label.ge-btn { cursor: pointer; }
+input.sr-only:focus-visible + *, label.ge-btn:focus-within { outline: 2px solid var(--ge-green); }
+.row-ok { color: var(--ge-green-ink); } .row-bad { color: var(--ge-bad); }

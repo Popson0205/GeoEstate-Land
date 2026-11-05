@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button, ErrorText, useAction } from "../components/ui";
+import WorkflowCard from "../components/WorkflowCard";
 import { api } from "../lib/api";
 import type { Me } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
@@ -55,6 +57,13 @@ export default function SettingsPage({ me }: { me: Me }) {
         </div>
         <div className="actions" style={{ marginTop: 16 }}><Button type="submit" variant="primary" busy={busy === "save"} disabled={ro || !s.data}>Save</Button></div>
       </form>
+      <WorkflowCard readOnly={ro} />
+      <section className="ge-card">
+        <h2>Ground control</h2>
+        <p className="ge-small ge-muted" style={{ marginTop: 0 }}>Old plans on the Minna grids can sit metres off the true ground. With control points whose true positions
+          are known, Land Registry corrects every survey captured on that grid.</p>
+        <Link className="ge-btn" to="/settings/control">Control points and corrections</Link>
+      </section>
     </>
   );
 }

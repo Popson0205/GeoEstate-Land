@@ -130,6 +130,7 @@ class Person:
     def post(self, url, **kw): return self._go("POST", url, **kw)
     def put(self, url, **kw): return self._go("PUT", url, **kw)
     def patch(self, url, **kw): return self._go("PATCH", url, **kw)
+    def delete(self, url, **kw): return self._go("DELETE", url, **kw)
 
 
 @pytest.fixture

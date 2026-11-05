@@ -62,6 +62,25 @@ function Retire({ p, onDone }: { p: Parcel; onDone: (p: Parcel) => void }) {
   );
 }
 
+function Pending({ p, me, onDone }: { p: Parcel; me: Me; onDone: (p: Parcel) => void }) {
+  const [note, setNote] = useState("");
+  const { busy, run } = useAction();
+  return (
+    <section className="ge-card" style={{ borderColor: "#e9c97a" }}>
+      <h2>Waiting for a registrar</h2>
+      <p className="ge-small" style={{ marginTop: 0 }}>{p.created_by_name} captured this parcel. Until a registrar approves it, it holds its ground (nothing else can
+        overlap it) but no title or dealing can be lodged on it.</p>
+      {me.role === "registrar" && me.can_write && <>
+        <div className="ge-field"><label htmlFor="pnote">Note (needed to reject)</label><input id="pnote" value={note} onChange={(e) => setNote(e.target.value)} /></div>
+        <div className="actions" style={{ marginTop: 10 }}>
+          <Button variant="primary" busy={busy === "a"} onClick={async () => { const n = await run("a", () => api.approveParcel(p.id, note), `${p.pin} approved`); if (n) onDone(n); }}>Approve</Button>
+          <Button variant="danger" busy={busy === "r"} disabled={note.trim().length < 3} onClick={async () => { const n = await run("r", () => api.rejectParcel(p.id, note), `${p.pin} rejected`); if (n) onDone(n); }}>Reject</Button>
+        </div>
+      </>}
+    </section>
+  );
+}
+
 /** A parcel: where it is, its survey and beacons, its neighbours and what happened to it. */
 export default function ParcelPage({ me }: { me: Me }) {
   const { id = "" } = useParams();
@@ -78,14 +97,27 @@ export default function ParcelPage({ me }: { me: Me }) {
   return (
     <>
       <div className="head">
-        <h1><span className="pin">{x.pin}</span> {x.status === "retired" ? <span className="ge-badge ge-badge-bad">Retired</span> : <span className="ge-badge ge-badge-ok">Active</span>}</h1>
+        <h1><span className="pin">{x.pin}</span> <span className={`ge-badge ${{ active: "ge-badge-ok", pending: "ge-badge-warn", retired: "ge-badge-bad", rejected: "ge-badge-bad" }[x.status]}`}>
+          {{ active: "Active", pending: "Waiting for approval", retired: "Retired", rejected: "Rejected" }[x.status]}</span></h1>
         <div className="actions">
           <Link className="ge-btn ge-btn-sm" to={`/parcels/${x.id}/extract`}>Register extract</Link>
           {canEdit && !editing && <Button small onClick={() => setEditing(true)}>Edit details</Button>}
+          {canEdit && <Link className="ge-btn ge-btn-sm" to={`/parcels/${x.id}/lodge?kind=subdivision`}>Subdivide</Link>}
+          {canEdit && x.neighbours.length > 0 && <Link className="ge-btn ge-btn-sm" to={`/parcels/${x.id}/lodge?kind=amalgamation`}>Amalgamate</Link>}
           {me.role === "registrar" && me.can_write && x.status === "active" && <Retire p={x} onDone={(n) => p.setData(n)} />}
         </div>
       </div>
       {x.status === "retired" && <p className="ge-notice ge-notice-bad" style={{ borderRadius: 10, marginTop: 0 }}>Retired: {x.retired_reason}</p>}
+      {x.status === "rejected" && <p className="ge-notice ge-notice-bad" style={{ borderRadius: 10, marginTop: 0 }}>Rejected by {x.decided_by_name}: {x.decision_note}</p>}
+      {x.status === "pending" && <Pending p={x} me={me} onDone={(n) => p.setData(n)} />}
+      {(x.parents.length > 0 || x.children.length > 0) && (
+        <p className="ge-notice ge-notice-info" style={{ borderRadius: 10, marginTop: 0 }}>
+          {x.parents.length > 0 && <>{x.parents[0].kind === "subdivision" ? "Subdivided out of " : "Amalgamated from "}
+            {x.parents.map((r, k) => <span key={r.id}>{k > 0 && ", "}<Link to={`/parcels/${r.id}`}>{r.pin}</Link></span>)} by {x.parents[0].number}. </>}
+          {x.children.length > 0 && <>{x.children[0].kind === "subdivision" ? "Subdivided into " : "Amalgamated into "}
+            {x.children.map((r, k) => <span key={r.id}>{k > 0 && ", "}<Link to={`/parcels/${r.id}`}>{r.pin}</Link></span>)} by {x.children[0].number}.</>}
+        </p>
+      )}
       <div className="two">
         <MapView fabric={fabric.data} focus={x.geometry} onSelect={(nid) => nid !== x.id && go(`/parcels/${nid}`)} height={380} label={`Map of ${x.pin}`} />
         <section className="ge-card">
@@ -99,6 +131,8 @@ export default function ParcelPage({ me }: { me: Me }) {
               <dt>Survey plan</dt><dd>{x.survey_plan_no || "—"}</dd>
               <dt>Surveyor</dt><dd>{x.surveyor || "—"}{x.survey_date && <span className="ge-muted"> · {day(x.survey_date)}</span>}</dd>
               <dt>Captured from</dt><dd>{x.method === "traverse" ? "Bearings and distances" : "Beacon coordinates"} on {x.grid_name.split(" (")[0]}</dd>
+              {x.correction && <><dt>Corrected</dt><dd>to ground control by {x.correction.method_name.split(" (")[0]}: {x.correction.shift_e >= 0 ? "+" : ""}{x.correction.shift_e} m E,
+                {" "}{x.correction.shift_n >= 0 ? "+" : ""}{x.correction.shift_n} m N <span className="ge-muted">(RMS {x.correction.rms_m} m, {x.correction.points} points)</span></dd></>}
               {x.closure_ratio != null && <><dt>Closure</dt><dd>1 in {x.closure_ratio.toLocaleString("en-NG")} ({metres(x.closure_error_m ?? 0)})</dd></>}
               <dt>Centre</dt><dd className="mono">{x.lat.toFixed(6)}, {x.lon.toFixed(6)}</dd>
               <dt>Registered</dt><dd>{day(x.created_at)} by {x.created_by_name}</dd>

@@ -43,6 +43,10 @@ export default function InstrumentPage({ me }: { me: Me }) {
             {d.party && <><dt>{{ mortgage: "Mortgagee", caveat: "Caveator", lease: "Lessee" }[i.kind as string] ?? "Party"}</dt><dd>{who(d.party)}</dd></>}
             {d.amount_ngn ? <><dt>Amount</dt><dd>{naira(Number(d.amount_ngn))}</dd></> : null}
             {i.kind === "discharge" && <><dt>Discharges</dt><dd>{String(d.encumbrance_label ?? "")}</dd></>}
+            {i.kind === "subdivision" && <><dt>Into</dt><dd>{(d.pieces as { area_sqm: number }[] ?? []).map((p) => `${p.area_sqm.toLocaleString("en-NG")} m²`).join(" + ")}</dd></>}
+            {i.kind === "amalgamation" && <><dt>Parcels</dt><dd>{(d.pins as string[] ?? []).join(" + ")} → {Number(d.area_sqm).toLocaleString("en-NG")} m²</dd></>}
+            {Array.isArray(d.children) && <><dt>New parcels</dt><dd>{(d.children as { id: string; pin: string }[]).map((c) =>
+              <Link key={c.id} className="pin" style={{ marginRight: 8 }} to={`/parcels/${c.id}`}>{c.pin}</Link>)}</dd></>}
             {i.consideration_ngn && <><dt>Consideration</dt><dd>{naira(i.consideration_ngn)}</dd></>}
             {i.instrument_date && <><dt>Dated</dt><dd>{day(i.instrument_date)}</dd></>}
             {i.reference && <><dt>Reference</dt><dd>{i.reference}</dd></>}
@@ -50,6 +54,7 @@ export default function InstrumentPage({ me }: { me: Me }) {
             <dt>Lodged</dt><dd>{when(i.lodged_at)} by {i.lodged_by_name}</dd>
             {i.decided_at && <><dt>{STATUS_NAME[i.status]}</dt><dd>{when(i.decided_at)} by {i.decided_by_name}</dd></>}
             {i.decision_note && <><dt>Note</dt><dd style={{ fontWeight: 400 }}>{i.decision_note}</dd></>}
+            {i.approvals && i.approvals.length > 0 && <><dt>Approved by</dt><dd>{i.approvals.map((a) => <div key={a.by_id}>{a.by_name} <span className="ge-muted ge-small">{when(a.at)}{a.note && ` · ${a.note}`}</span></div>)}</dd></>}
           </dl>
         </section>
         {i.status === "lodged" && (
@@ -59,10 +64,13 @@ export default function InstrumentPage({ me }: { me: Me }) {
               ? <div className="verdict is-bad" role="status"><strong>It cannot be registered now</strong><ul>{i.problems.map((p) => <li key={p}>{p}</li>)}</ul></div>
               : <div className="verdict is-ok" role="status"><strong>It can be registered</strong></div>}
             {i.warnings && i.warnings.length > 0 && <div className="warnings"><ul>{i.warnings.map((w) => <li key={w}>{w}</li>)}</ul></div>}
+            {(i.steps ?? 1) > 1 && <p className="ge-small" style={{ margin: 0 }}>This organization has <strong>{i.steps} registrars</strong> approve a {i.kind_name.toLowerCase()},
+              neither of them whoever lodged it: {i.approvals?.length ?? 0} of {i.steps} so far.</p>}
             {me.role === "registrar" && me.can_write && <>
               <div className="ge-field"><label htmlFor="note">Note (needed to reject)</label><textarea id="note" value={note} onChange={(e) => setNote(e.target.value)} /></div>
               <div className="actions">
-                <Button variant="primary" busy={busy === "register"} disabled={!!i.problems?.length} onClick={() => decide("register")}>Register</Button>
+                <Button variant="primary" busy={busy === "register"} disabled={!!i.problems?.length || i.approvals?.some((a) => a.by_id === me.id) || ((i.steps ?? 1) > 1 && i.lodged_by === me.id)}
+                  onClick={() => decide("register")}>{(i.steps ?? 1) - (i.approvals?.length ?? 0) > 1 ? `Approve (${(i.approvals?.length ?? 0) + 1} of ${i.steps})` : "Register"}</Button>
                 <Button variant="danger" busy={busy === "reject"} disabled={note.trim().length < 3} onClick={() => decide("reject")}>Reject</Button>
               </div>
             </>}
