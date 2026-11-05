@@ -168,3 +168,84 @@ def boundary(lonlat: list[tuple[float, float]]) -> Boundary:
 
 def wkt(ring: list[tuple[float, float]]) -> str:
     return "POLYGON((" + ", ".join(f"{x:.9f} {y:.9f}" for x, y in ring) + "))"
+
+
+# ---------- ground control: correcting a grid's plans to the true ground ----------
+MIN_POINTS = {"shift": 1, "helmert": 2, "affine": 3}
+METHOD_NAME = {"shift": "shift (translation)", "helmert": "similarity (Helmert: shift, rotation, scale)", "affine": "affine (6 parameters)"}
+
+
+@dataclass
+class Correction:
+    method: str
+    params: list[float]                       # shift: [tx, ty]; helmert: [a, b, tx, ty]; affine: [a, b, c, d, tx, ty] (about the centroid)
+    origin: tuple[float, float]               # the plan points' centroid, for numerical sense
+    residuals: list[dict]                     # per control point: name, de, dn, d
+    rms_m: float
+
+    def apply(self, pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        ox, oy = self.origin
+        out = []
+        for x, y in pts:
+            u, v = x - ox, y - oy
+            if self.method == "shift":
+                tx, ty = self.params
+                out.append((x + tx, y + ty))
+            elif self.method == "helmert":
+                a, b, tx, ty = self.params
+                out.append((ox + a * u - b * v + tx, oy + b * u + a * v + ty))
+            else:
+                a, b, c, d, tx, ty = self.params
+                out.append((ox + a * u + b * v + tx, oy + c * u + d * v + ty))
+        return out
+
+    def summary(self) -> dict:
+        tx, ty = (self.params[-2], self.params[-1])
+        s = {"method": self.method, "method_name": METHOD_NAME[self.method], "shift_e": round(tx, 3), "shift_n": round(ty, 3),
+             "rms_m": round(self.rms_m, 3), "points": len(self.residuals)}
+        if self.method == "helmert":
+            a, b = self.params[0], self.params[1]
+            s["scale_ppm"] = round((math.hypot(a, b) - 1) * 1e6, 1)
+            s["rotation_sec"] = round(math.degrees(math.atan2(b, a)) * 3600, 2)
+        return s
+
+
+def fit(method: str, control: list[dict]) -> Correction:
+    """Least squares from the control points' plan positions to their true ones. `control` has name, plan_e, plan_n, true_e, true_n."""
+    import numpy as np
+    if method not in MIN_POINTS:
+        raise Problem(422, f"Unknown correction \"{method}\".", code="validation")
+    if len(control) < MIN_POINTS[method]:
+        raise Problem(422, f"A {METHOD_NAME[method]} correction needs at least {MIN_POINTS[method]} control point"
+                           f"{'s' if MIN_POINTS[method] > 1 else ''} on this grid; there {'is' if len(control) == 1 else 'are'} {len(control)}.",
+                      code="too_few_control")
+    P = np.array([[float(c["plan_e"]), float(c["plan_n"])] for c in control])
+    T = np.array([[float(c["true_e"]), float(c["true_n"])] for c in control])
+    o = P.mean(axis=0)
+    U = P - o
+    if method == "shift":
+        params = list((T - P).mean(axis=0))
+    elif method == "helmert":
+        A = np.zeros((2 * len(P), 4)); L = np.zeros(2 * len(P))
+        for i, (u, v) in enumerate(U):
+            A[2 * i] = [u, -v, 1, 0]; A[2 * i + 1] = [v, u, 0, 1]
+            L[2 * i], L[2 * i + 1] = T[i, 0] - o[0], T[i, 1] - o[1]
+        params = list(np.linalg.lstsq(A, L, rcond=None)[0])
+    else:
+        A = np.zeros((2 * len(P), 6)); L = np.zeros(2 * len(P))
+        for i, (u, v) in enumerate(U):
+            A[2 * i] = [u, v, 0, 0, 1, 0]; A[2 * i + 1] = [0, 0, u, v, 0, 1]
+            L[2 * i], L[2 * i + 1] = T[i, 0] - o[0], T[i, 1] - o[1]
+        sol, _, rank, _ = np.linalg.lstsq(A, L, rcond=None)
+        if rank < 6:
+            raise Problem(422, "The control points lie on one line: an affine correction needs them spread around the area.", code="too_few_control")
+        params = list(sol)
+    c = Correction(method, [float(x) for x in params], (float(o[0]), float(o[1])), [], 0.0)
+    fitted = c.apply([tuple(p) for p in P])
+    res = []
+    for ctl, (fx, fy), t in zip(control, fitted, T):
+        de, dn = float(t[0] - fx), float(t[1] - fy)
+        res.append({"name": ctl["name"], "de": round(de, 3), "dn": round(dn, 3), "d": round(math.hypot(de, dn), 3)})
+    c.residuals = res
+    c.rms_m = math.sqrt(sum(r["d"] ** 2 for r in res) / len(res))
+    return c

@@ -22,17 +22,21 @@ from fastapi import APIRouter, Depends, Query
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, field_validator
 
+from shapely.geometry import shape
+
+from .. import fabric, geodesy
 from ..audit import audit
 from ..db import get_conn
 from ..errors import Problem
 from ..identity import need
-from .parcels import org_settings
+from .parcels import insert_parcel, org_settings, steps
 
 router = APIRouter(tags=["titles and land records"])
 
-KINDS = ("grant", "transfer", "mortgage", "caveat", "lease", "discharge", "revocation")
+KINDS = ("grant", "transfer", "mortgage", "caveat", "lease", "discharge", "revocation", "subdivision", "amalgamation")
+FABRIC = ("subdivision", "amalgamation")
 KIND_NAME = {"grant": "Grant of title", "transfer": "Transfer", "mortgage": "Mortgage", "caveat": "Caveat", "lease": "Lease",
-             "discharge": "Discharge", "revocation": "Revocation"}
+             "discharge": "Discharge", "revocation": "Revocation", "subdivision": "Subdivision", "amalgamation": "Amalgamation"}
 TITLE_KINDS = {"statutory_ro": "Statutory right of occupancy (C of O)", "customary_ro": "Customary right of occupancy",
                "lease": "Leasehold", "freehold": "Freehold", "allocation": "Allocation (letter of allocation)"}
 PARTY_KINDS = ("person", "company", "government", "community", "trustees")
@@ -57,7 +61,7 @@ class HolderIn(BaseModel):
 
 
 class LodgeIn(BaseModel):
-    kind: Literal["grant", "transfer", "mortgage", "caveat", "lease", "discharge", "revocation"]
+    kind: Literal["grant", "transfer", "mortgage", "caveat", "lease", "discharge", "revocation", "subdivision", "amalgamation"]
     instrument_date: date | None = None
     reference: str = Field("", max_length=120, description="Consent, gazette or court order number")
     consideration_ngn: float | None = Field(None, ge=0, le=1e14)
@@ -76,6 +80,11 @@ class LodgeIn(BaseModel):
     amount_ngn: float | None = Field(None, ge=0, le=1e14)
     # discharge
     encumbrance_id: UUID | None = None
+    # subdivision: the cut line, in longitude/latitude (drawn on the map) or on a survey grid
+    cut: list[tuple[float, float]] = Field(default_factory=list, max_length=200)
+    cut_epsg: int | None = Field(None, description="The grid the cut line's points are on; longitude/latitude when left out")
+    # amalgamation: the neighbours merged with this parcel
+    parcels: list[UUID] = Field(default_factory=list, max_length=50)
     register_now: bool = Field(False, description="Registrars: lodge and register at once")
 
     @field_validator("title_no")
@@ -173,6 +182,10 @@ def summary(kind: str, d: dict) -> str:
         return {"mortgage": f"In favour of {who}{extra}", "caveat": f"By {who}", "lease": f"To {who}" + (f" for {d['term_years']} years" if d.get("term_years") else "")}[kind]
     if kind == "discharge":
         return f"Ends {d.get('encumbrance_label', 'an encumbrance')}"
+    if kind == "subdivision":
+        return f"Into {len(d.get('pieces', []))} parcels: " + ", ".join(f"{p['area_sqm']:,.0f} m²" for p in d.get("pieces", []))
+    if kind == "amalgamation":
+        return "With " + ", ".join(d.get("pins", [])[1:]) + f" into one parcel of {d.get('area_sqm', 0):,.0f} m²"
     return d.get("details") or "Ends the title"
 
 
@@ -194,7 +207,9 @@ async def assess(conn, user, parcel: dict, kind: str, d: dict, ignore: UUID | No
     reg = await current(conn, parcel["id"])
     t = reg["title"]
     if parcel["status"] != "active" and kind != "revocation":
-        problems.append(f"{parcel['pin']} is retired.")
+        problems.append(f"{parcel['pin']} is {parcel['status']}.")
+    if kind in FABRIC:
+        return await assess_fabric(conn, user, parcel, kind, d, ignore, problems, warnings)
     if kind == "grant":
         if t:
             problems.append(f"{parcel['pin']} already has title {t['title_no']}. Revoke it first, or lodge a transfer.")
@@ -239,10 +254,10 @@ async def assess(conn, user, parcel: dict, kind: str, d: dict, ignore: UUID | No
 
 
 def _need_feature(user, kind):
-    f = "titles" if kind in ("grant", "revocation") else "transactions"
+    f = "titles" if kind in ("grant", "revocation") else "parcels" if kind in FABRIC else "transactions"
     if user["features"] and f not in user["features"]:
-        raise Problem(403, "Your organization's Land Registry plan does not include " + ("titles." if f == "titles" else "dealings in land (transfers, mortgages, caveats, leases)."),
-                      code="no_feature")
+        what = {"titles": "titles.", "parcels": "changes to the parcel fabric.", "transactions": "dealings in land (transfers, mortgages, caveats, leases)."}
+        raise Problem(403, "Your organization's Land Registry plan does not include " + what[f], code="no_feature")
 
 
 # ---------- lodging, registering, rejecting ----------
@@ -280,6 +295,25 @@ async def lodge(parcel_id: UUID, body: LodgeIn, user=Depends(need("officer", wri
         e = await cur.fetchone()
         d |= {"encumbrance_id": str(body.encumbrance_id),
               "encumbrance_label": f"the {e['kind']}" + (f" of {e['name']}" if e and e["name"] else "") if e else "an encumbrance"}
+    if k == "subdivision":
+        cut = body.cut
+        if body.cut_epsg and body.cut_epsg != 4326:
+            if body.cut_epsg not in geodesy.GRIDS:
+                raise Problem(422, "Choose one of the survey grids listed.", code="validation", fields={"cut_epsg": ["unknown grid"]})
+            cut = geodesy.to_wgs84(cut, body.cut_epsg)
+        geom = await parcel_shape(conn, parcel_id)
+        d |= {"cut": [[round(x, 9), round(y, 9)] for x, y in cut],
+              "pieces": [{"area_sqm": fabric.describe(pc)["area_sqm"]} for pc in fabric.pieces(geom, cut)]}
+    if k == "amalgamation":
+        ids = [parcel_id] + [x for x in dict.fromkeys(body.parcels) if x != parcel_id]
+        if len(ids) < 2:
+            raise Problem(422, "Choose the neighbouring parcels to merge with this one.", code="validation", fields={"parcels": ["missing"]})
+        cur = await conn.execute("SELECT id, pin FROM parcels WHERE org_id = %s AND id = ANY(%s)", (user["org_id"], ids))
+        found = {r["id"]: r["pin"] for r in await cur.fetchall()}
+        if len(found) != len(ids):
+            raise Problem(422, "One of those parcels is not in this registry.", code="validation", fields={"parcels": ["not found"]})
+        merged = fabric.union([await parcel_shape(conn, x) for x in ids])
+        d |= {"parcel_ids": [str(x) for x in ids], "pins": [found[x] for x in ids], "area_sqm": fabric.describe(merged)["area_sqm"]}
     if k == "revocation" and len(body.details.strip()) < 5:
         raise Problem(422, "Give the reason for the revocation.", code="validation", fields={"details": ["missing"]})
     problems, warnings = await assess(conn, user, parcel, k, d)
@@ -287,6 +321,7 @@ async def lodge(parcel_id: UUID, body: LodgeIn, user=Depends(need("officer", wri
         raise Problem(422, " ".join(problems), code="not_registrable", problems=problems, warnings=warnings)
     if body.register_now and user["role"] != "registrar":
         raise Problem(403, "Only registrars can register an instrument.", code="forbidden")
+    need_n = steps(await org_settings(conn, user), k)
     cur = await conn.execute("UPDATE settings SET instrument_next = instrument_next + 1 WHERE org_id = %s RETURNING instrument_next - 1 AS n",
                              (user["org_id"],))
     number = f"INS/{date.today().year}/{(await cur.fetchone())['n']:06d}"
@@ -296,8 +331,10 @@ async def lodge(parcel_id: UUID, body: LodgeIn, user=Depends(need("officer", wri
         (user["org_id"], number, parcel_id, k, Jsonb(d), body.instrument_date, body.reference.strip(), body.consideration_ngn, user["id"], user["name"]))
     iid = (await cur.fetchone())["id"]
     await audit(conn, user, "instrument.lodge", "parcel", parcel_id, pin=parcel["pin"], number=number, kind=k)
+    if need_n == 0 or (body.register_now and need_n == 1):
+        return await _register(conn, user, iid, "", auto=need_n == 0)
     if body.register_now:
-        return await _register(conn, user, iid, "")
+        warnings.append("This organization's workflow has two registrars approve it, neither of them whoever lodged it: it is waiting for them.")
     return {**await _instrument(conn, user, iid), "warnings": warnings}
 
 
@@ -306,7 +343,11 @@ async def _instrument(conn, user, iid) -> dict:
     i = await cur.fetchone()
     if not i:
         raise Problem(404, "Instrument not found.", code="not_found")
-    return _out(i)
+    out = _out(i)
+    cur = await conn.execute("SELECT by_id, by_name, at, note FROM approvals WHERE target_type = 'instrument' AND target_id = %s ORDER BY at", (iid,))
+    out["approvals"] = await cur.fetchall()
+    out["steps"] = steps(await org_settings(conn, user), i["kind"])
+    return out
 
 
 @router.get("/instruments", summary="Instruments, the lodged ones waiting first")
@@ -332,7 +373,7 @@ class Decision(BaseModel):
     note: str = Field("", max_length=2000)
 
 
-async def _register(conn, user, iid, note: str) -> dict:
+async def _register(conn, user, iid, note: str, auto: bool = False) -> dict:
     cur = await conn.execute("SELECT * FROM instruments WHERE id = %s AND org_id = %s FOR UPDATE", (iid, user["org_id"]))
     ins = await cur.fetchone()
     if not ins:
@@ -346,6 +387,19 @@ async def _register(conn, user, iid, note: str) -> dict:
     problems, _ = await assess(conn, user, parcel, k, d, ignore=iid)
     if problems:
         raise Problem(422, " ".join(problems), code="not_registrable", problems=problems)
+    need_n = steps(await org_settings(conn, user), k)
+    if not auto:
+        if need_n >= 2 and ins["lodged_by"] == user["id"]:
+            raise Problem(403, "Whoever lodged it cannot also approve it: this organization's workflow has two other registrars do that.",
+                          code="own_lodging")
+        cur = await conn.execute("INSERT INTO approvals (target_type, target_id, by_id, by_name, note) VALUES ('instrument', %s, %s, %s, %s) "
+                                 "ON CONFLICT DO NOTHING RETURNING id", (iid, user["id"], user["name"], note.strip()))
+        if not await cur.fetchone():
+            raise Problem(409, f"You have already approved {ins['number']}: it needs another registrar.", code="already_approved")
+        cur = await conn.execute("SELECT count(*) AS n FROM approvals WHERE target_type = 'instrument' AND target_id = %s", (iid,))
+        if (await cur.fetchone())["n"] < need_n:
+            await audit(conn, user, "instrument.approve", "parcel", parcel["id"], pin=parcel["pin"], number=ins["number"], kind=k)
+            return await _instrument(conn, user, iid)
     reg = await current(conn, parcel["id"])
     t = reg["title"]
     if k == "grant":
@@ -379,6 +433,8 @@ async def _register(conn, user, iid, note: str) -> dict:
                             d.get("details", ""), iid))
     elif k == "discharge":
         await conn.execute("UPDATE encumbrances SET to_instrument = %s WHERE id = %s AND to_instrument IS NULL", (iid, d["encumbrance_id"]))
+    elif k in FABRIC:
+        await apply_fabric(conn, user, ins, parcel, k, d)
     elif k == "revocation":
         await conn.execute("UPDATE titles SET status = 'revoked', ended_by = %s WHERE id = %s", (iid, t["id"]))
         await conn.execute("UPDATE holdings SET to_instrument = %s WHERE title_id = %s AND to_instrument IS NULL", (iid, t["id"]))
@@ -458,3 +514,100 @@ async def get_party(party_id: UUID, user=Depends(need()), conn=Depends(get_conn)
 async def kinds(user=Depends(need())):
     return {"titles": TITLE_KINDS, "instruments": KIND_NAME, "parties": list(PARTY_KINDS)}
 
+
+
+# ---------- subdivision and amalgamation ----------
+async def parcel_shape(conn, parcel_id):
+    cur = await conn.execute("SELECT ST_AsGeoJSON(geom, 10) AS g FROM parcels WHERE id = %s", (parcel_id,))
+    import json
+    return shape(json.loads((await cur.fetchone())["g"]))
+
+
+async def assess_fabric(conn, user, parcel, kind, d, ignore, problems, warnings):
+    ids = [UUID(x) for x in d.get("parcel_ids", [])] or [parcel["id"]]
+    cur = await conn.execute("SELECT id, pin, status FROM parcels WHERE id = ANY(%s)", (ids,))
+    rows = await cur.fetchall()
+    for r in rows:
+        if r["status"] != "active" and r["id"] != parcel["id"]:
+            problems.append(f"{r['pin']} is {r['status']}.")
+    cur = await conn.execute("SELECT i.number, p.pin FROM instruments i JOIN parcels p ON p.id = i.parcel_id "
+                             "WHERE i.status = 'lodged' AND (%s::uuid IS NULL OR i.id <> %s::uuid) "
+                             "AND (i.parcel_id = ANY(%s) OR i.data->'parcel_ids' ?| %s)", (ignore, ignore, ids, [str(x) for x in ids]))
+    for r in await cur.fetchall():
+        problems.append(f"{r['number']} is lodged against {r['pin']} and waiting: decide it first.")
+    regs = [await current(conn, x) for x in ids]
+    titled = [r for r in regs if r["title"]]
+    if kind == "amalgamation" and titled:
+        if len(titled) != len(regs):
+            problems.append("Some of these parcels are titled and some are not: grant or revoke titles first so they match.")
+        else:
+            owners = {frozenset((str(h["id"]), h["share"]) for h in r["holders"]) for r in regs}
+            if len(owners) > 1:
+                problems.append("The parcels have different proprietors: transfer them to the same proprietors first.")
+            if len({r["title"]["kind"] for r in regs}) > 1:
+                problems.append("The parcels hold different kinds of title.")
+    if titled and not problems:
+        warnings.append("Titled land: each new parcel gets a new title with the same proprietors, terms and encumbrances; "
+                        + ("the old title ends." if kind == "subdivision" else "the old titles end."))
+    return problems, warnings
+
+
+async def apply_fabric(conn, user, ins, parcel, kind, d):
+    """Make the new parcels, carry the titles across, and retire the old parcels."""
+    ids = [UUID(x) for x in d.get("parcel_ids", [])] or [parcel["id"]]
+    cur = await conn.execute("SELECT * FROM parcels WHERE id = ANY(%s) ORDER BY array_position(%s, id)", (ids, ids))
+    parents = await cur.fetchall()
+    first = parents[0]
+    cur = await conn.execute("SELECT b.name, b.lon, b.lat FROM beacons b WHERE b.parcel_id = ANY(%s)", (ids,))
+    known = await cur.fetchall()
+    if kind == "subdivision":
+        shapes = fabric.pieces(await parcel_shape(conn, first["id"]), [tuple(x) for x in d["cut"]])
+    else:
+        shapes = [fabric.union([await parcel_shape(conn, x) for x in ids])]
+    regs = [await current(conn, x) for x in ids]
+    children = []
+    for i, poly in enumerate(shapes):
+        g = fabric.describe(poly)
+        part = f" (part {i + 1} of {len(shapes)} of {first['pin']})" if kind == "subdivision" else ""
+        pid, pin = await insert_parcel(conn, user, g["ring"], g["area_sqm"], g["perimeter_m"], fabric.beacons(poly, known, first["source_epsg"]),
+                                       method="coordinates", source_epsg=first["source_epsg"], land_use=first["land_use"],
+                                       address=(first["address"] + part).strip(), locality=first["locality"],
+                                       survey_plan_no=first["survey_plan_no"], surveyor=first["surveyor"], survey_date=first["survey_date"],
+                                       notes=f"{KIND_NAME[kind]} {ins['number']} of " + ", ".join(p["pin"] for p in parents) + ".")
+        children.append((pid, pin, g["area_sqm"]))
+        for par in parents:
+            await conn.execute("INSERT INTO lineage (parent_id, child_id, instrument_id) VALUES (%s, %s, %s)", (par["id"], pid, ins["id"]))
+    # titles: the new parcels take the old title's terms, proprietors and encumbrances
+    titled = [r for r in regs if r["title"]]
+    if titled:
+        t0 = titled[0]["title"]
+        rents = [sum(float(r["title"]["ground_rent_ngn"] or 0) for r in titled)] if kind == "amalgamation" else \
+            fabric.apportion(float(t0["ground_rent_ngn"]) if t0["ground_rent_ngn"] is not None else None, [c[2] for c in children])
+        encs = {(e["kind"], str(e["party_id"]), str(e["amount_ngn"]), e["details"]): e for r in titled for e in r["encumbrances"]}
+        for (pid, pin, _), rent in zip(children, rents):
+            cur = await conn.execute("UPDATE settings SET title_next = title_next + 1 WHERE org_id = %s RETURNING title_prefix, title_next - 1 AS n",
+                                     (user["org_id"],))
+            sx = await cur.fetchone()
+            cur = await conn.execute(
+                "INSERT INTO titles (org_id, parcel_id, title_no, kind, purpose, term_years, starts_on, ends_on, ground_rent_ngn, granted_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (user["org_id"], pid, f"{sx['title_prefix']}/{sx['n']:06d}", t0["kind"], t0["purpose"], t0["term_years"], t0["starts_on"],
+                 t0["ends_on"], rent if rent else None, ins["id"]))
+            tid = (await cur.fetchone())["id"]
+            for h in titled[0]["holders"]:
+                await conn.execute("INSERT INTO holdings (title_id, party_id, share, from_instrument) VALUES (%s, %s, %s, %s)",
+                                   (tid, h["id"], h["share"], ins["id"]))
+            for e in encs.values():
+                await conn.execute("INSERT INTO encumbrances (title_id, kind, party_id, amount_ngn, term_years, details, from_instrument) "
+                                   "VALUES (%s, %s, %s, %s, %s, %s, %s)", (tid, e["kind"], e["party_id"], e["amount_ngn"], e["term_years"],
+                                                                           e["details"], ins["id"]))
+        for r in titled:
+            await conn.execute("UPDATE titles SET status = 'superseded', ended_by = %s WHERE id = %s", (ins["id"], r["title"]["id"]))
+            await conn.execute("UPDATE holdings SET to_instrument = %s WHERE title_id = %s AND to_instrument IS NULL", (ins["id"], r["title"]["id"]))
+            await conn.execute("UPDATE encumbrances SET to_instrument = %s WHERE title_id = %s AND to_instrument IS NULL", (ins["id"], r["title"]["id"]))
+    word = "Subdivided into " if kind == "subdivision" else "Amalgamated into "
+    for par in parents:
+        await conn.execute("UPDATE parcels SET status = 'retired', retired_reason = %s, updated_at = now() WHERE id = %s",
+                           (word + ", ".join(c[1] for c in children) + f" by {ins['number']}", par["id"]))
+    d = {**d, "children": [{"id": str(c[0]), "pin": c[1], "area_sqm": c[2]} for c in children]}
+    await conn.execute("UPDATE instruments SET data = %s WHERE id = %s", (Jsonb(d), ins["id"]))

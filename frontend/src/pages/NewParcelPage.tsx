@@ -4,7 +4,8 @@ import MapView from "../components/MapView";
 import { Button, ErrorText, useToast } from "../components/ui";
 import { ApiError, api, type CaptureBody } from "../lib/api";
 import { LAND_USES, area, metres, parseRows } from "../lib/format";
-import type { Check, Me } from "../lib/types";
+import type { Check, DxfRead, Me } from "../lib/types";
+import { MAX_DXF, readText } from "../lib/readFile";
 import { useLoad } from "../lib/useLoad";
 
 type Method = "traverse" | "coordinates";
@@ -26,6 +27,7 @@ export function CheckResult({ c }: { c: Check }) {
         <dt>Perimeter</dt><dd>{metres(c.perimeter_m)}</dd>
         <dt>Beacons</dt><dd>{c.beacons.length}</dd>
         <dt>Grid</dt><dd>{c.grid_name}</dd>
+        {c.correction && <><dt>Corrected</dt><dd>to ground control ({c.correction.method_name.split(" (")[0]}, {c.correction.shift_e} m E, {c.correction.shift_n} m N; RMS {c.correction.rms_m} m)</dd></>}
         {cl && <>
           <dt>Misclosure</dt><dd>{cl.ratio == null ? "closes exactly" : `${metres(cl.misclosure_m)} (ΔE ${cl.misclosure_e} m, ΔN ${cl.misclosure_n} m)`}</dd>
           <dt>Closure</dt><dd>{cl.ratio == null ? "exact" : `1 in ${cl.ratio.toLocaleString("en-NG")}`} <span className="ge-muted">· needs 1 in {cl.required_ratio.toLocaleString("en-NG")}</span></dd>
@@ -52,7 +54,24 @@ export default function NewParcelPage({ me }: { me: Me }) {
   const [d, setD] = useState({ land_use: "", address: "", locality: "", survey_plan_no: "", surveyor: "", survey_date: "", notes: "" });
   const [check, setCheck] = useState<{ c: Check; for: string } | null>(null);
   const [err, setErr] = useState<unknown>(null);
-  const [busy, setBusy] = useState<"check" | "register" | null>(null);
+  const [busy, setBusy] = useState<"check" | "register" | "dxf" | null>(null);
+  const [dxf, setDxf] = useState<DxfRead | null>(null);
+  const openDxf = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > MAX_DXF) { setErr("The drawing is over 15 MB. Export only the parcel boundaries."); return; }
+    setBusy("dxf"); setErr(null);
+    try {
+      const got = await api.importDxf(file.name, await readText(file));
+      setDxf(got);
+      if (got.shapes.length === 1) takeShape(got.shapes[0].points, got.shapes[0].label);
+    } catch (e) { setErr(e); } finally { setBusy(null); }
+  };
+  const takeShape = (pts: { x: number; y: number; beacon: string }[], label: string) => {
+    setMethod("coordinates");
+    setPoints([...pts.map((p) => [p.beacon, String(p.x), String(p.y)] as Row), ["", "", ""]]);
+    if (label) setD((x) => ({ ...x, address: x.address || label }));
+    setCheck(null);
+  };
   useEffect(() => { if (settings.data && epsg == null) setEpsg(settings.data.default_epsg); }, [settings.data, epsg]);
 
   const rows = method === "traverse" ? legs : points;
@@ -167,6 +186,19 @@ export default function NewParcelPage({ me }: { me: Me }) {
                 </table>
               </div>
             </div>
+            <div className="actions">
+              <label className="ge-btn ge-btn-sm" htmlFor="dxf">{busy === "dxf" ? "Reading the drawing…" : "Import from a DXF drawing"}</label>
+              <input id="dxf" type="file" accept=".dxf" className="sr-only" onChange={(e) => { void openDxf(e.target.files?.[0]); e.target.value = ""; }} />
+              <Link className="ge-small" to="/parcels/import">Register a whole layout from one drawing</Link>
+            </div>
+            {dxf && dxf.shapes.length > 1 && (
+              <div className="ge-small">
+                <strong>{dxf.filename}</strong> has {dxf.shapes.length} closed boundaries. Choose one:
+                <div className="chips" style={{ marginTop: 6 }}>{dxf.shapes.slice(0, 60).map((sh) => (
+                  <button key={sh.index} type="button" className="chip" onClick={() => takeShape(sh.points, sh.label)}>
+                    {sh.label || `Shape ${sh.index + 1}`} · {Math.round(sh.area_plan).toLocaleString("en-NG")} m²</button>))}</div>
+              </div>
+            )}
             <details className="paste">
               <summary>Paste rows from a spreadsheet or the survey plan</summary>
               <label className="sr-only" htmlFor="paste">Rows to paste</label>
