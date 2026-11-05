@@ -12,6 +12,10 @@ export function describe(a: { action: string; details: Record<string, unknown> }
   const d = a.details ?? {};
   if (a.action === "parcel.update") return `changed ${Object.keys((d.changed as object) ?? {}).map((k) => k.replace(/_/g, " ")).join(", ") || "details"}`;
   if (a.action === "parcel.retire") return `retired it: ${d.reason ?? ""}`;
+  if (a.action.startsWith("instrument.")) {
+    const verb = { lodge: "lodged", register: "registered", reject: "rejected", withdraw: "withdrew" }[a.action.slice(11)] ?? a.action;
+    return `${verb} ${d.number} (${String(d.kind ?? "")})${d.note ? `: ${d.note}` : ""}`;
+  }
   return WHAT[a.action] ?? a.action;
 }
 
@@ -36,7 +40,8 @@ export default function ActivityPage() {
             {rows.map((a) => (
               <li key={a.id}><strong>{a.actor_name ?? "Someone"}</strong>{" "}
                 {a.target_type === "parcel" && a.target_id
-                  ? <>{a.action === "parcel.create" ? "registered" : describe(a).startsWith("changed") ? "changed" : "retired"}{" "}
+                  ? a.action.startsWith("instrument.") ? <>{describe(a)} on <Link className="pin" to={`/parcels/${a.target_id}`}>{String(a.details.pin ?? "a parcel")}</Link></>
+                  : <>{a.action === "parcel.create" ? "registered" : describe(a).startsWith("changed") ? "changed" : "retired"}{" "}
                     <Link className="pin" to={`/parcels/${a.target_id}`}>{String(a.details.pin ?? "a parcel")}</Link>
                     {a.action === "parcel.update" && <span className="ge-muted"> ({describe(a).replace(/^changed /, "")})</span>}
                     {a.action === "parcel.retire" && <span className="ge-muted">: {String(a.details.reason ?? "")}</span>}</>

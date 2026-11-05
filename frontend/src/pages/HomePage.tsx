@@ -12,12 +12,13 @@ export function ParcelTable({ rows, empty }: { rows: ParcelRow[]; empty: string 
   return (
     <div className="table-wrap">
       <table className="ge-table">
-        <thead><tr><th>PIN</th><th>Address</th><th>Land use</th><th className="num">Area</th><th>Survey plan</th><th>Registered</th></tr></thead>
+        <thead><tr><th>PIN</th><th>Title</th><th>Address</th><th>Land use</th><th className="num">Area</th><th>Survey plan</th><th>Registered</th></tr></thead>
         <tbody>
           {rows.map((p) => (
             <tr key={p.id} className="is-link" onClick={() => go(`/parcels/${p.id}`)}>
               <td><Link className="pin" to={`/parcels/${p.id}`} onClick={(e) => e.stopPropagation()}>{p.pin}</Link>
                 {p.status === "retired" && <> <span className="ge-badge ge-badge-bad">Retired</span></>}</td>
+              <td>{p.title_no ?? <span className="ge-muted">—</span>}</td>
               <td>{[p.address, p.locality].filter(Boolean).join(", ") || <span className="ge-muted">—</span>}</td>
               <td>{p.land_use || <span className="ge-muted">—</span>}</td>
               <td className="num">{area(p.area_sqm)}</td>
@@ -52,13 +53,13 @@ export default function HomePage({ me }: { me: Me }) {
         <div className="stats">
           <div className="stat"><span>Active parcels</span><strong>{h.active.toLocaleString("en-NG")}{h.limit != null && <small className="ge-muted ge-small"> of {h.limit.toLocaleString("en-NG")}</small>}</strong></div>
           <div className="stat"><span>Land registered</span><strong>{area(h.area_sqm)}</strong></div>
-          <div className="stat"><span>Added this month</span><strong>{h.this_month}</strong></div>
-          <div className="stat"><span>Survey grid</span><strong style={{ fontSize: 15 }}>{h.settings.grid_name.split(" (")[0]}</strong></div>
+          <div className="stat"><span>Titled parcels</span><strong>{h.titled.toLocaleString("en-NG")}</strong></div>
+          <div className="stat"><span>Instruments waiting</span><strong>{h.lodged ? <Link to="/instruments">{h.lodged}</Link> : 0}</strong></div>
         </div>
       )}
       <form className="toolbar" role="search" onSubmit={submit}>
         <label className="sr-only" htmlFor="q">Search the register</label>
-        <input id="q" type="search" style={{ flex: "1 1 260px" }} placeholder="PIN, address, locality, survey plan or surveyor" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input id="q" type="search" style={{ flex: "1 1 260px" }} placeholder="PIN, title number, proprietor, address, survey plan…" value={q} onChange={(e) => setQ(e.target.value)} />
         <label className="sr-only" htmlFor="status">Which parcels</label>
         <select id="status" value={status} onChange={(e) => { setStatus(e.target.value); setSearch({ q: q.trim(), status: e.target.value }); }}>
           <option value="active">Active</option><option value="retired">Retired</option><option value="all">All</option>

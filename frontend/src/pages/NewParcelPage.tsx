@@ -89,7 +89,7 @@ export default function NewParcelPage({ me }: { me: Me }) {
     if (typeof body === "string" || !fresh?.ok) return;
     setBusy("register"); setErr(null);
     try {
-      const p = await api.register({ ...body, ...d, survey_date: d.survey_date || null });
+      const p = await api.registerParcel({ ...body, ...d, survey_date: d.survey_date || null });
       toast(`Registered ${p.pin}`);
       go(`/parcels/${p.id}`);
     } catch (e) {

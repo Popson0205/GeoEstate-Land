@@ -1,4 +1,4 @@
-import type { App, AuditEntry, Check, Grid, Home, Me, OrgSettings, Parcel, ParcelRow } from "./types";
+import type { App, AuditEntry, Check, Grid, HolderData, Home, Instrument, InstrumentKind, Kinds, Me, OrgSettings, Parcel, ParcelRow, PartyDetail, PartyIn, PartyRow, PublicResult, Register } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string, public body?: Record<string, unknown>) { super(message); }
@@ -44,14 +44,32 @@ export const api = {
   signOut: () => req<void>("POST", "/auth/sign-out"),
   grids: () => req<Grid[]>("GET", "/grids"),
   settings: () => req<OrgSettings>("GET", "/settings"),
-  saveSettings: (b: { default_epsg: number; pin_prefix: string; closure_ratio: number; overlap_tolerance_sqm: number }) => req<OrgSettings>("PUT", "/settings", b),
+  saveSettings: (b: { default_epsg: number; pin_prefix: string; closure_ratio: number; overlap_tolerance_sqm: number; title_prefix?: string; public_lookup?: string }) => req<OrgSettings>("PUT", "/settings", b),
   home: () => req<Home>("GET", "/home"),
   check: (b: CaptureBody) => req<Check>("POST", "/parcels/check", b),
-  register: (b: CaptureBody & ParcelDetails) => req<Parcel>("POST", "/parcels", b),
+  registerParcel: (b: CaptureBody & ParcelDetails) => req<Parcel>("POST", "/parcels", b),
   parcels: (f: { q?: string; status?: string } = {}) => req<ParcelRow[]>("GET", `/parcels${q(f)}`),
   fabric: () => req<GeoJSON.FeatureCollection & { bbox: [number, number, number, number] | null }>("GET", "/parcels.geojson"),
   parcel: (id: string) => req<Parcel>("GET", `/parcels/${id}`),
   update: (id: string, b: ParcelDetails) => req<Parcel>("PATCH", `/parcels/${id}`, b),
   retire: (id: string, reason: string) => req<Parcel>("POST", `/parcels/${id}/retire`, { reason }),
+  register: (id: string) => req<Register>("GET", `/parcels/${id}/register`),
+  kinds: () => req<Kinds>("GET", "/register/kinds"),
+  lodge: (id: string, b: LodgeBody) => req<Instrument & { warnings?: string[] }>("POST", `/parcels/${id}/instruments`, b),
+  instruments: (status = "lodged") => req<Instrument[]>("GET", `/instruments?status=${status}`),
+  instrument: (id: string) => req<Instrument>("GET", `/instruments/${id}`),
+  registerInstrument: (id: string, note = "") => req<Instrument>("POST", `/instruments/${id}/register`, { note }),
+  rejectInstrument: (id: string, note: string) => req<Instrument>("POST", `/instruments/${id}/reject`, { note }),
+  withdrawInstrument: (id: string) => req<Instrument>("POST", `/instruments/${id}/withdraw`),
+  parties: (q: string) => req<PartyRow[]>("GET", `/parties${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  party: (id: string) => req<PartyDetail>("GET", `/parties/${id}`),
+  publicRegistry: (slug: string) => req<{ name: string; shows_holders: boolean }>("GET", `/public/${encodeURIComponent(slug)}`),
+  publicLookup: (slug: string, q: string) => req<PublicResult>("GET", `/public/${encodeURIComponent(slug)}/lookup?q=${encodeURIComponent(q)}`),
   audit: (before?: number) => req<AuditEntry[]>("GET", `/audit${before ? `?before=${before}` : ""}`),
 };
+
+export interface LodgeBody {
+  kind: InstrumentKind; instrument_date?: string | null; reference?: string; consideration_ngn?: number | null; details?: string;
+  title_kind?: string; title_no?: string; purpose?: string; term_years?: number | null; starts_on?: string | null; ground_rent_ngn?: number | null;
+  holders?: HolderData[]; party?: PartyIn; amount_ngn?: number | null; encumbrance_id?: string; register_now?: boolean;
+}

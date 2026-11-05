@@ -7,6 +7,7 @@ import { LAND_USES, area, day, metres, when } from "../lib/format";
 import type { Me, Parcel } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { describe } from "./ActivityPage";
+import { Folio, InstrumentLine } from "../components/RegisterView";
 
 const fix = (n: number | null, d: number) => (n == null ? "—" : n.toLocaleString("en-NG", { minimumFractionDigits: d, maximumFractionDigits: d }));
 
@@ -67,6 +68,7 @@ export default function ParcelPage({ me }: { me: Me }) {
   const go = useNavigate();
   const p = useLoad(() => api.parcel(id), [id]);
   const fabric = useLoad(() => api.fabric());
+  const reg = useLoad(() => api.register(id), [id]);
   const [editing, setEditing] = useState(false);
   if (p.error) return <><h1>Parcel</h1><ErrorText error={p.error} /><p><Link to="/">Back to the register</Link></p></>;
   if (!p.data) return <p className="loading">Loading the parcel…</p>;
@@ -78,6 +80,7 @@ export default function ParcelPage({ me }: { me: Me }) {
       <div className="head">
         <h1><span className="pin">{x.pin}</span> {x.status === "retired" ? <span className="ge-badge ge-badge-bad">Retired</span> : <span className="ge-badge ge-badge-ok">Active</span>}</h1>
         <div className="actions">
+          <Link className="ge-btn ge-btn-sm" to={`/parcels/${x.id}/extract`}>Register extract</Link>
           {canEdit && !editing && <Button small onClick={() => setEditing(true)}>Edit details</Button>}
           {me.role === "registrar" && me.can_write && x.status === "active" && <Retire p={x} onDone={(n) => p.setData(n)} />}
         </div>
@@ -102,6 +105,19 @@ export default function ParcelPage({ me }: { me: Me }) {
               {x.notes && <><dt>Notes</dt><dd style={{ fontWeight: 400, whiteSpace: "pre-wrap" }}>{x.notes}</dd></>}
             </dl>
           )}
+        </section>
+      </div>
+      <div className="two" style={{ marginTop: 18 }}>
+        <section className="ge-card" aria-label="The register">
+          <div className="head" style={{ marginBottom: 10 }}><h2>Title and proprietors</h2>
+            {canEdit && <Link className="ge-btn ge-btn-primary ge-btn-sm" to={`/parcels/${x.id}/lodge`}>Lodge an instrument</Link>}</div>
+          <ErrorText error={reg.error} />
+          {reg.data ? <Folio r={reg.data} /> : !reg.error && <p className="loading">Loading…</p>}
+        </section>
+        <section className="ge-card">
+          <h2>Instruments</h2>
+          {reg.data && (reg.data.instruments.length ? reg.data.instruments.map((i) => <InstrumentLine key={i.id} i={i} />)
+            : <p className="ge-muted" style={{ margin: 0 }}>None lodged yet.</p>)}
         </section>
       </div>
       <section className="ge-card" style={{ marginTop: 18 }}>
