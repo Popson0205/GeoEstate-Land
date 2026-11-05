@@ -89,3 +89,43 @@ dialog.modal::backdrop { background: rgba(26,34,51,.35); }
 @media (max-width: 900px) { .two { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) { .start-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .start-grid > :first-of-type { grid-column: 1 / -1; } }
 .stack > * { min-width: 0; max-width: 100%; } .table-wrap { position: relative; }
+
+/* titles and land records */
+.party { position: relative; }
+.party.is-chosen { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--ge-line); border-radius: 8px; background: var(--ge-bg); }
+.party-search { position: relative; }
+.party-found { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; list-style: none; margin: 4px 0 0; padding: 4px; background: #fff; border: 1px solid var(--ge-line); border-radius: 8px; box-shadow: 0 10px 24px rgba(27,43,94,.12); max-height: 260px; overflow: auto; }
+.party-found button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+.party-found button:hover, .party-found button:focus-visible { background: var(--ge-navy-50); }
+fieldset.holder { border: 1px solid var(--ge-line); border-radius: var(--ge-r); padding: 12px 14px 14px; margin: 0; min-width: 0; }
+fieldset.holder legend { font-weight: 600; font-size: 13px; padding: 0 6px; color: var(--ge-navy); }
+input.share { width: 90px; min-height: 34px; padding: 4px 8px; border: 1px solid #c9d1de; border-radius: 8px; font: inherit; }
+.kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.kinds button { text-align: left; border: 1px solid var(--ge-line); border-radius: 8px; background: #fff; padding: 10px 12px; font: inherit; cursor: pointer; }
+.kinds button strong { display: block; color: var(--ge-navy); font-size: 14px; } .kinds button span { font-size: 12px; color: var(--ge-muted); }
+.kinds button[aria-pressed="true"] { border-color: var(--ge-navy); background: var(--ge-navy-50); box-shadow: inset 0 0 0 1px var(--ge-navy); }
+.kinds button:disabled { opacity: .45; cursor: not-allowed; }
+.register-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.title-no { font-size: 20px; font-weight: 700; color: var(--ge-navy); }
+.untitled { padding: 14px; border: 1px dashed #c9d1de; border-radius: 8px; color: var(--ge-muted); }
+.inst { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--ge-line); align-items: baseline; }
+.inst:last-child { border-bottom: 0; }
+.inst .num-col { font: 600 13px ui-monospace, Menlo, Consolas, monospace; color: var(--ge-navy); }
+.inst .sub { grid-column: 2 / -1; font-size: 13px; color: var(--ge-muted); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--ge-line); margin-bottom: 14px; overflow-x: auto; }
+.tabs button { border: 0; background: transparent; padding: 10px 14px; font: 600 14px var(--ge-font); color: var(--ge-muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--ge-navy); border-bottom-color: var(--ge-navy); }
+.count { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: var(--ge-green); color: #fff; font-size: 11px; text-align: center; line-height: 18px; }
+
+/* the register extract and the public lookup */
+.extract { max-width: 820px; margin: 0 auto; background: #fff; border: 1px solid var(--ge-line); border-radius: var(--ge-r); padding: 32px 36px; }
+.extract header { display: flex; gap: 16px; align-items: center; border-bottom: 2px solid var(--ge-navy); padding-bottom: 14px; margin-bottom: 18px; }
+.extract header img { height: 56px; }
+.extract h1 { margin: 0; font-size: 22px; } .extract h2 { margin: 22px 0 8px; font-size: 15px; text-transform: uppercase; letter-spacing: .05em; }
+.extract .foot { margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--ge-line); font-size: 12px; color: var(--ge-muted); }
+.lookup { max-width: 620px; margin: 6vh auto; }
+.lookup form { display: flex; gap: 8px; } .lookup form input { flex: 1; font: inherit; min-height: 44px; padding: 8px 12px; border: 1px solid #c9d1de; border-radius: 8px; }
+@media print {
+  .ge-bar, .ge-notice, .no-print, .toasts { display: none !important; }
+  .ge-page { background: #fff; } .ge-main { padding: 0; max-width: none; } .extract { border: 0; padding: 0; }
+}

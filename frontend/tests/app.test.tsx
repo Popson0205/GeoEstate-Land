@@ -26,6 +26,17 @@ const PARCEL = { id: "p7", pin: "KLA-000007", status: "active", area_sqm: "600.1
   geometry: { type: "Polygon", coordinates: [RING] }, grid_name: "Minna / UTM zone 32N", beacons: CHECK.beacons, neighbours: [],
   history: [{ at: "2026-11-05T10:00:00Z", actor_name: "Musa Bello", action: "parcel.create", details: {} }] };
 
+const REG = { parcel: { id: "p7", pin: "KLA-000007", status: "active", area_sqm: "600.12", land_use: "", locality: "", address: "" },
+  title: null, holders: [], encumbrances: [], instruments: [], past_titles: [] };
+const TITLED = { ...REG, title: { id: "t1", title_no: "TR/000001", kind: "statutory_ro", kind_name: "Statutory right of occupancy (C of O)", status: "current",
+  purpose: "residential", term_years: 99, starts_on: "2026-01-01", ends_on: "2125-01-01", ground_rent_ngn: "25000.00", granted_by_number: "INS/2026/000001", created_at: "" },
+  holders: [{ id: "pa1", kind: "person", name: "Amaka Obi", id_type: "NIN", id_no: "12345678901", share: "1/1", since_number: "INS/2026/000001", since: "2026-11-05T10:00:00Z" }],
+  encumbrances: [{ id: "e1", kind: "caveat", amount_ngn: null, term_years: null, details: "Claims a purchaser's interest", party_id: "pa2", party_name: "Chidi Eze", instrument_number: "INS/2026/000002", since: "2026-11-05T10:00:00Z" }] };
+const INS = { id: "i9", number: "INS/2026/000009", parcel_id: "p7", pin: "KLA-000007", kind: "transfer", kind_name: "Transfer", summary: "To Halima Bello",
+  status: "lodged", data: { holders: [{ party: { name: "Halima Bello", id_type: "NIN", id_no: "222" }, share: "1/1" }], details: "" }, instrument_date: null,
+  reference: "GC/2026/19", consideration_ngn: "48000000.00", lodged_by: "u2", lodged_by_name: "Tunde Officer", lodged_at: "2026-11-05T10:00:00Z",
+  decided_by_name: null, decided_at: null, decision_note: "", problems: [], warnings: ["The title is mortgaged to Zenith Bank Plc: the mortgage stays on it after the transfer."] };
+
 type Handler = (body: unknown) => [number, unknown];
 let routes: Record<string, Handler>;
 let calls: { method: string; path: string; body: unknown; headers: Record<string, string> }[];
@@ -36,8 +47,10 @@ beforeEach(() => {
   routes = {
     "GET /me": ok(ME), "GET /apps": ok([]), "GET /grids": ok([{ epsg: 26332, name: "Minna / UTM zone 32N" }, { epsg: 4326, name: "WGS 84 (GPS)" }]),
     "GET /settings": ok(SETTINGS), "GET /parcels.geojson": ok({ type: "FeatureCollection", features: [], bbox: null }),
-    "GET /home": ok({ active: 6, retired: 0, area_sqm: 3600, this_month: 2, latest: [], limit: null, settings: SETTINGS }),
-    "GET /parcels?status=active": ok([PARCEL]), "GET /parcels/p7": ok(PARCEL),
+    "GET /home": ok({ active: 6, retired: 0, area_sqm: 3600, this_month: 2, titled: 1, lodged: 1, latest: [], limit: null, settings: SETTINGS }),
+    "GET /parcels?status=active": ok([PARCEL]), "GET /parcels/p7": ok(PARCEL), "GET /parcels/p7/register": ok(REG),
+    "GET /register/kinds": ok({ titles: { statutory_ro: "Statutory right of occupancy (C of O)", customary_ro: "Customary right of occupancy" }, instruments: {}, parties: [] }),
+    "GET /parties?q=Am": ok([{ id: "pa1", kind: "person", name: "Amaka Obi", id_type: "NIN", id_no: "12345678901", phone: "", holdings: 1 }]),
   };
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET", path = url.replace(/^\/api/, "");
@@ -130,5 +143,77 @@ describe("Land Registry", () => {
     type("Why", "Re-surveyed");
     fireEvent.click(screen.getByRole("button", { name: "Retire it" }));
     expect(await screen.findByText("Retired: Re-surveyed")).toBeTruthy();
+  });
+
+  it("lodges a grant to a party already in the registry", async () => {
+    routes["POST /parcels/p7/instruments"] = (b) => [201, { ...INS, id: "i1", kind: "grant", kind_name: "Grant of title", data: b }];
+    routes["GET /instruments/i1"] = ok({ ...INS, id: "i1", kind: "grant", kind_name: "Grant of title" });
+    open("/parcels/p7/lodge");
+    expect(await screen.findByRole("heading", { name: "Grant of title" })).toBeTruthy();     // no title yet: a grant is the only choice
+    expect((screen.getByRole("button", { name: /Transfer/ }) as HTMLButtonElement).disabled).toBe(true);
+    type("Name", "Am");
+    fireEvent.click(await screen.findByRole("option", { name: /Amaka Obi/ }));
+    type("Commencing", "2026-01-01");
+    fireEvent.click(screen.getByRole("button", { name: "Lodge it" }));
+    await screen.findByText(/INS\/2026\/000009 lodged|INS\/2026\/000009/);
+    expect(calls.find((c) => c.method === "POST")!.body).toMatchObject({ kind: "grant", title_kind: "statutory_ro", term_years: 99, starts_on: "2026-01-01",
+      holders: [{ party: { id: "pa1", name: "Amaka Obi" }, share: "1/1" }], register_now: false });
+  });
+
+  it("shows the register of a titled parcel, and refuses a transfer while a caveat stands", async () => {
+    routes["GET /parcels/p7/register"] = ok(TITLED);
+    routes["POST /parcels/p7/instruments"] = () => [422, { detail: "A caveat by Chidi Eze stops transfers until it is discharged.", code: "not_registrable",
+      problems: ["A caveat by Chidi Eze stops transfers until it is discharged."] }];
+    open("/parcels/p7");
+    expect(await screen.findByText("TR/000001")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Amaka Obi" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Chidi Eze" })).toBeTruthy();
+    cleanup();
+    open("/parcels/p7/lodge");
+    fireEvent.click(await screen.findByRole("button", { name: /Transfer/ }));
+    expect((screen.getByRole("button", { name: /Discharge/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /Grant of title/ }) as HTMLButtonElement).disabled).toBe(true);
+    type("Name", "Halima Bello");
+    fireEvent.click(screen.getByRole("button", { name: "Lodge it" }));
+    expect(await screen.findByText("This cannot be lodged")).toBeTruthy();
+    expect(screen.getByText(/stops transfers/)).toBeTruthy();
+  });
+
+  it("lets a registrar register or reject a lodged instrument", async () => {
+    routes["GET /instruments/i9"] = ok(INS);
+    routes["POST /instruments/i9/reject"] = (b) => [200, { ...INS, status: "rejected", decision_note: (b as { note: string }).note, decided_by_name: "Musa Bello", decided_at: "2026-11-05T11:00:00Z" }];
+    open("/instruments/i9");
+    expect(await screen.findByText("It can be registered")).toBeTruthy();
+    expect(screen.getByText(/mortgage stays on it/)).toBeTruthy();
+    const reject = screen.getByRole("button", { name: "Reject" }) as HTMLButtonElement;
+    expect(reject.disabled).toBe(true);
+    type("Note (needed to reject)", "No consent attached.");
+    fireEvent.click(reject);
+    expect(await screen.findByText("No consent attached.")).toBeTruthy();
+    expect(screen.getAllByText("Rejected").length).toBeGreaterThan(0);
+  });
+
+  it("an officer sees the instrument waiting for a registrar", async () => {
+    routes["GET /me"] = ok({ ...ME, id: "u2", role: "officer", org_role: "member" });
+    routes["GET /instruments/i9"] = ok(INS);
+    open("/instruments/i9");
+    expect(await screen.findByText("Waiting for a registrar.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Register" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Withdraw it" })).toBeTruthy();
+  });
+
+  it("looks up a parcel publicly, without signing in", async () => {
+    routes["GET /public/kabusa"] = ok({ name: "Kabusa Estate Registry", shows_holders: false });
+    routes["GET /public/kabusa/lookup?q=KLA-000007"] = ok({ registry: "Kabusa Estate Registry", pin: "KLA-000007", status: "active", area_sqm: 600.12,
+      land_use: "residential", locality: "Kabusa", lon: 7.46, lat: 8.98, title: { title_no: "TR/000001", kind: "Statutory right of occupancy (C of O)", starts_on: null, ends_on: null },
+      encumbrances: [{ kind: "mortgage", count: 1 }], dealings_pending: 1, holders: null, checked_at: "2026-11-05T10:00:00Z" });
+    open("/lookup/kabusa");
+    expect(await screen.findByText("Kabusa Estate Registry")).toBeTruthy();
+    type("PIN or title number", "KLA-000007");
+    fireEvent.click(screen.getByRole("button", { name: "Look up" }));
+    expect(await screen.findByText("Parcel KLA-000007")).toBeTruthy();
+    expect(screen.getByText("Mortgage")).toBeTruthy();
+    expect(screen.getByText("1 lodged, not yet registered")).toBeTruthy();
+    expect(calls.some((c) => c.path === "/me")).toBe(false);
   });
 });

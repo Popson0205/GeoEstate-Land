@@ -37,3 +37,9 @@ export function parseRows(text: string, kind: "traverse" | "coordinates"): { row
   });
   return { rows, bad };
 }
+export const naira = (n: number | string | null | undefined) =>
+  n == null || n === "" ? "" : `₦${Number(n).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const STATUS_TONE: Record<string, string> = { lodged: "ge-badge-info", registered: "ge-badge-ok", rejected: "ge-badge-bad", withdrawn: "" };
+export const STATUS_NAME: Record<string, string> = { lodged: "Lodged", registered: "Registered", rejected: "Rejected", withdrawn: "Withdrawn" };
+export const ENC_NAME: Record<string, string> = { mortgage: "Mortgage", caveat: "Caveat", lease: "Lease" };
+export const PARTY_KIND: Record<string, string> = { person: "Person", company: "Company", government: "Government", community: "Community or family", trustees: "Trustees" };

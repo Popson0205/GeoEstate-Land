@@ -61,14 +61,14 @@ export default function Bar({ me, onSignOut }: { me: Me; onSignOut: () => void }
   const [open, setOpen] = useState(false);
   useEffect(() => { void api.apps().then(setApps, () => setApps([])); }, []);
   const notice = licenceNotice(me.product);
-  const links: [string, string, boolean][] = [["/", "Register", true], ["/map", "Map", true], ["/parcels/new", "New parcel", me.role !== "viewer"],
+  const links: [string, string, boolean][] = [["/", "Register", true], ["/map", "Map", true], ["/instruments", "Instruments", true], ["/parcels/new", "New parcel", me.role !== "viewer"],
     ["/settings", "Settings", me.role === "registrar"], ["/activity", "Activity", me.role === "registrar"]];
   return (
     <>
       <header className="ge-bar">
         <a className="ge-brand" href="/"><img src="/logo.png" alt="GeoEstate" /><span>GeoEstate <strong>Land Registry</strong></span></a>
         <nav className={`land-nav${open ? " is-open" : ""}`} aria-label="Sections" onClick={() => setOpen(false)}>
-          {links.filter((l) => l[2]).map(([to, label]) => <NavLink key={to} to={to} end={to === "/"}>{label}</NavLink>)}
+          {links.filter((l) => l[2]).map(([to, label]) => <NavLink key={to} to={to} end={to === "/" || to === "/parcels/new"}>{label}</NavLink>)}
         </nav>
         <span className="ge-spacer" />
         <Apps apps={apps} />

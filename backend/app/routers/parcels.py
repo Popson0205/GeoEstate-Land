@@ -23,15 +23,27 @@ class SettingsIn(BaseModel):
     pin_prefix: str = Field(pattern=r"^[A-Za-z0-9]{1,8}$")
     closure_ratio: int = Field(ge=500, le=100000, description="A traverse must close to better than 1 in this")
     overlap_tolerance_sqm: float = Field(ge=0, le=100)
+    title_prefix: str | None = Field(None, pattern=r"^[A-Za-z0-9/]{1,12}$", description="Titles are numbered PREFIX/000001")
+    public_lookup: Literal["off", "basic", "holders"] | None = Field(None, description="What anyone can see at the public lookup")
+
+
+def public_allowed(user: dict) -> bool:
+    return not user["features"] or "public_lookup" in user["features"]
 
 
 async def org_settings(conn, user: dict) -> dict:
-    await conn.execute("INSERT INTO settings (org_id, org_name) VALUES (%s, %s) ON CONFLICT (org_id) DO UPDATE "
-                       "SET org_name = EXCLUDED.org_name WHERE settings.org_name <> EXCLUDED.org_name",
-                       (user["org_id"], user["org_name"] or ""))
+    """The organization's settings, made on first use; its name and Geohub address (slug) kept up to date. A plan without
+    the public lookup turns it off."""
+    await conn.execute("INSERT INTO settings (org_id, org_name, org_slug) VALUES (%s, %s, %s) ON CONFLICT (org_id) DO UPDATE "
+                       "SET org_name = EXCLUDED.org_name, org_slug = EXCLUDED.org_slug, "
+                       "    public_lookup = CASE WHEN %s THEN settings.public_lookup ELSE 'off' END "
+                       "WHERE settings.org_name <> EXCLUDED.org_name OR settings.org_slug <> EXCLUDED.org_slug "
+                       "   OR (NOT %s AND settings.public_lookup <> 'off')",
+                       (user["org_id"], user["org_name"] or "", user.get("org_slug") or "", public_allowed(user), public_allowed(user)))
     cur = await conn.execute("SELECT * FROM settings WHERE org_id = %s", (user["org_id"],))
     s = await cur.fetchone()
-    return {**s, "grid_name": geodesy.grid_name(s["default_epsg"]), "overlap_tolerance_sqm": float(s["overlap_tolerance_sqm"])}
+    return {**s, "grid_name": geodesy.grid_name(s["default_epsg"]), "overlap_tolerance_sqm": float(s["overlap_tolerance_sqm"]),
+            "public_allowed": public_allowed(user)}
 
 
 @router.get("/grids", summary="The survey grids Land Registry knows")
@@ -49,10 +61,14 @@ async def put_settings(body: SettingsIn, user=Depends(need("registrar", write=Tr
     geodesy.grid_name(body.default_epsg)
     if body.default_epsg not in geodesy.GRIDS:
         raise Problem(422, "Choose one of the survey grids listed.", code="validation", fields={"default_epsg": ["unknown grid"]})
+    if body.public_lookup not in (None, "off") and not public_allowed(user):
+        raise Problem(403, "Your organization's Land Registry plan does not include the public lookup.", code="no_feature")
     await org_settings(conn, user)
     await conn.execute("UPDATE settings SET default_epsg = %s, pin_prefix = %s, closure_ratio = %s, overlap_tolerance_sqm = %s, "
-                       "updated_at = now() WHERE org_id = %s",
-                       (body.default_epsg, body.pin_prefix.upper(), body.closure_ratio, body.overlap_tolerance_sqm, user["org_id"]))
+                       "title_prefix = COALESCE(%s, title_prefix), public_lookup = COALESCE(%s, public_lookup), updated_at = now() "
+                       "WHERE org_id = %s",
+                       (body.default_epsg, body.pin_prefix.upper(), body.closure_ratio, body.overlap_tolerance_sqm,
+                        body.title_prefix.upper() if body.title_prefix else None, body.public_lookup, user["org_id"]))
     await audit(conn, user, "settings.update", **body.model_dump())
     return await org_settings(conn, user)
 
@@ -160,7 +176,8 @@ async def check_parcel(body: CaptureIn, user=Depends(need("officer")), conn=Depe
 
 PARCEL_SQL = ("SELECT p.id, p.pin, p.status, p.area_sqm, p.perimeter_m, p.land_use, p.address, p.locality, p.notes, p.method, "
               "  p.source_epsg, p.closure_error_m, p.closure_ratio, p.survey_plan_no, p.surveyor, p.survey_date, p.retired_reason, "
-              "  p.created_by_name, p.created_at, p.updated_at, ST_X(ST_Centroid(p.geom)) AS lon, ST_Y(ST_Centroid(p.geom)) AS lat "
+              "  p.created_by_name, p.created_at, p.updated_at, ST_X(ST_Centroid(p.geom)) AS lon, ST_Y(ST_Centroid(p.geom)) AS lat, "
+              "  (SELECT t.title_no FROM titles t WHERE t.parcel_id = p.id AND t.status = 'current') AS title_no "
               "FROM parcels p ")
 
 
@@ -204,8 +221,11 @@ async def list_parcels(q: str | None = None, status: str | None = Query("active"
     if status != "all":
         where.append("p.status = %s"); params.append(status)
     if q:
-        where.append("(p.pin ILIKE %s OR p.address ILIKE %s OR p.locality ILIKE %s OR p.survey_plan_no ILIKE %s OR p.surveyor ILIKE %s)")
-        params += [f"%{q.strip()}%"] * 5
+        where.append("(p.pin ILIKE %s OR p.address ILIKE %s OR p.locality ILIKE %s OR p.survey_plan_no ILIKE %s OR p.surveyor ILIKE %s "
+                     " OR EXISTS (SELECT 1 FROM titles t LEFT JOIN holdings h ON h.title_id = t.id AND h.to_instrument IS NULL "
+                     "            LEFT JOIN parties pa ON pa.id = h.party_id "
+                     "            WHERE t.parcel_id = p.id AND t.status = 'current' AND (t.title_no ILIKE %s OR pa.name ILIKE %s)))")
+        params += [f"%{q.strip()}%"] * 7
     cur = await conn.execute(PARCEL_SQL + f"WHERE {' AND '.join(where)} ORDER BY p.created_at DESC LIMIT %s", (*params, limit))
     return await cur.fetchall()
 
@@ -284,6 +304,13 @@ async def retire(parcel_id: UUID, body: RetireIn, user=Depends(need("registrar",
     p = await get_parcel(parcel_id, user, conn)
     if p["status"] == "retired":
         raise Problem(409, f"{p['pin']} is already retired.", code="retired")
+    cur = await conn.execute("SELECT (SELECT title_no FROM titles WHERE parcel_id = %s AND status = 'current') AS title, "
+                             "(SELECT count(*) FROM instruments WHERE parcel_id = %s AND status = 'lodged') AS lodged", (parcel_id, parcel_id))
+    r = await cur.fetchone()
+    if r["title"]:
+        raise Problem(409, f"{p['pin']} has title {r['title']}: revoke it before retiring the parcel.", code="titled")
+    if r["lodged"]:
+        raise Problem(409, f"{p['pin']} has instruments lodged and waiting: decide them first.", code="lodged")
     await conn.execute("UPDATE parcels SET status = 'retired', retired_reason = %s, updated_at = now() WHERE id = %s",
                        (body.reason.strip(), parcel_id))
     await audit(conn, user, "parcel.retire", "parcel", parcel_id, pin=p["pin"], reason=body.reason.strip())
@@ -294,8 +321,11 @@ async def retire(parcel_id: UUID, body: RetireIn, user=Depends(need("registrar",
 async def home(user=Depends(need()), conn=Depends(get_conn)):
     cur = await conn.execute("SELECT count(*) FILTER (WHERE status = 'active') AS active, count(*) FILTER (WHERE status = 'retired') AS retired, "
                              "COALESCE(sum(area_sqm) FILTER (WHERE status = 'active'), 0) AS area_sqm, "
-                             "count(*) FILTER (WHERE created_at > date_trunc('month', now())) AS this_month FROM parcels WHERE org_id = %s",
-                             (user["org_id"],))
+                             "count(*) FILTER (WHERE created_at > date_trunc('month', now())) AS this_month, "
+                             "(SELECT count(*) FROM titles t WHERE t.org_id = %s AND t.status = 'current') AS titled, "
+                             "(SELECT count(*) FROM instruments i WHERE i.org_id = %s AND i.status = 'lodged') AS lodged "
+                             "FROM parcels WHERE org_id = %s",
+                             (user["org_id"], user["org_id"], user["org_id"]))
     counts = await cur.fetchone()
     cur = await conn.execute(PARCEL_SQL + "WHERE p.org_id = %s ORDER BY p.created_at DESC LIMIT 8", (user["org_id"],))
     return {**counts, "area_sqm": float(counts["area_sqm"]), "latest": await cur.fetchall(),
