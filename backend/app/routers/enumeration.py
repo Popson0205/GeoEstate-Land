@@ -8,6 +8,7 @@ and can be lodged as a grant of title (customary right of occupancy, unless the 
 to decide: systematic first registration.
 
 Geohub is read as the signed-in person (GeoEstate ID), so only forms they could open in Geohub are offered."""
+import json
 import re
 from uuid import UUID
 
@@ -119,7 +120,9 @@ async def add_source(body: SourceIn, request: Request, user=Depends(need("regist
         raise Problem(422, "That form is not in the Geohub projects you can open.", code="validation", fields={"form_id": ["not found"]})
     if f["geometry_type"] != "area":
         raise Problem(422, "Parcels come from a form that maps areas (polygons).", code="validation", fields={"form_id": ["not an area form"]})
-    fm = TEMPLATE_MAP.get(f.get("template") or "", {}) | _clean(body.field_map, MAP_KEYS)
+    asked = {q["id"] for q in f["fields"]}
+    known = {k: v for k, v in TEMPLATE_MAP.get(f.get("template") or "", {}).items() if v in asked}   # questions since removed are skipped
+    fm = known | _clean(body.field_map, MAP_KEYS)
     unknown = [v for v in fm.values() if v not in {q["id"] for q in f["fields"]}]
     if unknown:
         raise Problem(422, f"The form has no question {unknown[0]}.", code="validation", fields={"field_map": ["unknown question"]})
@@ -187,6 +190,24 @@ def mapped(s: dict, props: dict) -> dict:
     return m
 
 
+def plan_of(props: dict) -> dict | None:
+    """Geohub's plan_json (lib/surveyPlan.ts in the collector), when it is one Land Registry can use."""
+    raw = props.get("plan_json")
+    if not isinstance(raw, str):
+        return None
+    try:
+        p = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(p, dict) or p.get("v") != 1 or not isinstance(p.get("grid"), int):
+        return None
+    if p.get("method") == "traverse" and isinstance(p.get("start"), list) and isinstance(p.get("legs"), list) and len(p["legs"]) >= 3:
+        return p
+    if p.get("method") == "coordinates" and isinstance(p.get("points"), list) and len(p["points"]) >= 3:
+        return p
+    return None
+
+
 def ring(geometry: dict) -> list[list[float]]:
     g = geometry
     if g["type"] == "MultiPolygon":
@@ -200,7 +221,16 @@ def ring(geometry: dict) -> list[list[float]]:
     return g["coordinates"][0]
 
 
-def capture(geometry: dict) -> CaptureIn:
+def capture(geometry: dict, props: dict | None = None) -> CaptureIn:
+    """The survey to check: the plot's survey plan when the field team plotted it from one in Geohub (recomputed here
+    with the registry's own engine, closure rule and ground control), otherwise the boundary as drawn."""
+    plan = plan_of(props or {})
+    if plan:
+        if plan["method"] == "traverse":
+            e, n = plan["start"]
+            return CaptureIn(method="traverse", epsg=plan["grid"], start={"beacon": "", "easting": e, "northing": n},
+                             legs=[{"beacon": "", "bearing": f"{int(d)}°{int(m)}'{s}\"", "distance_m": L} for d, m, s, L in plan["legs"]])
+        return CaptureIn(method="coordinates", epsg=plan["grid"], points=[{"x": x, "y": y} for x, y in plan["points"]])
     pts = ring(geometry)
     if len(pts) > 1 and pts[0] == pts[-1]:
         pts = pts[:-1]
@@ -228,6 +258,7 @@ async def features(sid: UUID, request: Request, status: str = Query("approved", 
         out.append({"id": f["id"], "seq": f["seq"], "status": f["status"], "version": f["version"], "geometry": f["geometry"],
                     "created_by_name": f["created_by_name"], "created_at": f["created_at"], "reviewed_by_name": f["reviewed_by_name"],
                     "mapped": mapped(s, f["properties"]), "properties": f["properties"],
+                    "located_by": "plan" if plan_of(f["properties"]) else ("gps" if f["properties"].get("gps_src") == "gps" else "map"),
                     "imported": {k: imp[k] for k in ("parcel_id", "pin", "status", "claim_number", "claim_status")} | {"has_claim": bool(imp["claim"])}
                     if imp else None, "changed_since": bool(imp and imp["feature_version"] != f["version"])})
     return {"features": out, "next": page["next"]}
@@ -245,8 +276,9 @@ async def check_features(sid: UUID, body: Pick, request: Request, user=Depends(n
     for fid in body.feature_ids:
         try:
             f = await geohub(request, f"features/{fid}")
-            c = await check(conn, user, capture(f["geometry"]))
+            c = await check(conn, user, capture(f["geometry"], f["properties"]))
             out.append({"id": str(fid), "ok": c["ok"], "problems": c["problems"], "warnings": c["warnings"], "area_sqm": c["area_sqm"],
+                        "closure": c["closure"], "correction": c["correction"], "method": c["method"],
                         "geometry": c["geometry"], "mapped": mapped(s, f["properties"])})
         except Problem as e:
             out.append({"id": str(fid), "ok": False, "problems": [e.detail], "warnings": []})
@@ -287,7 +319,7 @@ async def import_features(sid: UUID, body: Pick, request: Request, user=Depends(
                 f = await geohub(request, f"features/{fid}")
                 if f["status"] != "approved":
                     raise Problem(422, f"It is {f['status']} in Geohub: only approved features are registered.", code="not_approved")
-                c = await check(conn, user, capture(f["geometry"]))
+                c = await check(conn, user, capture(f["geometry"], f["properties"]))
                 if not c["ok"]:
                     raise Problem(422, " ".join(c["problems"]), code="not_registrable")
                 m = mapped(s, f["properties"])
@@ -296,7 +328,9 @@ async def import_features(sid: UUID, body: Pick, request: Request, user=Depends(
                        + (f" on {when}" if when else "") + "." + (f"\n{m['tenure']}" if m["tenure"] else "") \
                        + (f"\n{m['notes']}" if m["notes"] else "")
                 pid, pin = await insert_parcel(conn, user, c["geometry"]["coordinates"][0], c["area_sqm"], c["perimeter_m"], c["beacons"],
-                                               status="pending" if pending else "active", method="coordinates", source_epsg=4326,
+                                               status="pending" if pending else "active", method=c["method"], source_epsg=c["epsg"],
+                                               closure_error_m=(c["closure"] or {}).get("misclosure_m"), closure_ratio=(c["closure"] or {}).get("ratio"),
+                                               correction=c["correction"],
                                                land_use=m["land_use"][:60], address=m["full_address"][:300], locality=m["locality"][:120], notes=note[:4000],
                                                survey_plan_no=s["defaults"].get("survey_plan_no", ""), surveyor=s["defaults"].get("surveyor", ""))
                 claim = _claim(m)

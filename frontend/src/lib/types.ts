@@ -85,6 +85,8 @@ export interface Mapped { plot_no: string; address: string; locality: string; la
   claimant_kind?: string; dispute?: string; dispute_note?: string; tenure?: string }
 export interface EnumFeature { id: string; seq: number; status: string; version: number; geometry: GeoJSON.Geometry; created_by_name: string | null;
   created_at: string; reviewed_by_name: string | null; mapped: Mapped; properties: Record<string, unknown>; changed_since: boolean;
+  located_by?: "plan" | "gps" | "map";
   imported: { parcel_id: string; pin: string; status: string; claim_number: string | null; claim_status: string | null; has_claim: boolean } | null }
 export interface EnumResult { id: string; ok: boolean; problems?: string[]; warnings?: string[]; area_sqm?: number; pin?: string; parcel_id?: string;
+  closure?: { ratio: number | null } | null;
   status?: string; claim?: { ok: boolean; number?: string; status?: string; problems?: string[] } }

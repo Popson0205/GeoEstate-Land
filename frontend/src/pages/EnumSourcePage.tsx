@@ -109,7 +109,8 @@ export default function EnumSourcePage({ me }: { me: Me }) {
                       <td>{can && !f.imported && f.status === "approved" && <input type="checkbox" aria-label={`Plot ${f.mapped.full_address || f.seq}`} checked={pick.has(f.id)}
                         onChange={(e) => setPick((p) => { const n = new Set(p); if (e.target.checked) n.add(f.id); else n.delete(f.id); return n; })} />}</td>
                       <td>{f.mapped.full_address || <span className="ge-muted">No plot number</span>}
-                        <div className="ge-muted ge-small">{[f.created_by_name, day(f.created_at), f.status !== "approved" && STATUS_WORD[f.status]].filter(Boolean).join(" · ")}</div></td>
+                        <div className="ge-muted ge-small">{[f.located_by === "plan" ? "From the survey plan" : f.located_by === "gps" ? "By GPS" : "Drawn on the map",
+                          f.created_by_name, day(f.created_at), f.status !== "approved" && STATUS_WORD[f.status]].filter(Boolean).join(" · ")}</div></td>
                       <td>{f.mapped.claimant_name || <span className="ge-muted">—</span>}{f.mapped.claimant_phone && <div className="ge-muted ge-small">{f.mapped.claimant_phone}</div>}
                         {f.mapped.dispute && <div><span className="ge-badge ge-badge-warn" title={f.mapped.dispute_note}>Disputed</span></div>}</td>
                       <td className="ge-small">{f.imported ? <>
@@ -117,7 +118,7 @@ export default function EnumSourcePage({ me }: { me: Me }) {
                           {f.imported.status === "pending" && <span className="ge-badge ge-badge-warn" style={{ marginLeft: 6 }}>Waiting</span>}
                           <div className="ge-muted">{f.imported.claim_number ? `Claim ${f.imported.claim_number}: ${f.imported.claim_status}` : f.imported.has_claim ? "Claim not lodged yet" : "No claimant"}</div>
                           {f.changed_since && <div className="row-bad">Changed in Geohub since</div>}</>
-                        : r ? (r.ok ? (r.pin ? <span className="row-ok">Registered as {r.pin}</span> : <span className="row-ok">Can be registered{r.area_sqm ? ` · ${Math.round(r.area_sqm).toLocaleString("en-NG")} m²` : ""}</span>)
+                        : r ? (r.ok ? (r.pin ? <span className="row-ok">Registered as {r.pin}</span> : <span className="row-ok">Can be registered{r.area_sqm ? ` · ${Math.round(r.area_sqm).toLocaleString("en-NG")} m²` : ""}{r.closure?.ratio ? ` · closes 1 in ${r.closure.ratio.toLocaleString("en-NG")}` : ""}</span>)
                           : <span className="row-bad">{r.problems?.join(" ")}</span>)
                         : <span className="ge-muted">Not yet</span>}</td>
                     </tr>
