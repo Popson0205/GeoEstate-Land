@@ -47,7 +47,7 @@ function Apps({ apps }: { apps: App[] }) {
             const cls = `ge-app ge-app-${a.product}`;
             if (a.current) return <div key={a.product} className={`${cls} is-here`} role="menuitem" aria-current="page">{body}</div>;
             if (!a.url) return <div key={a.product} className={`${cls} is-off`} role="menuitem" aria-disabled="true">{body}</div>;
-            return <a key={a.product} className={cls} role="menuitem" href={a.url}>{body}</a>;
+            return <a key={a.product} className={cls} role="menuitem" href={a.url} target="_blank" rel="noopener">{body}</a>;   // each app in its own tab
           })}
         </div>
       )}
