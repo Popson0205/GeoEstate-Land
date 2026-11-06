@@ -101,3 +101,73 @@ def test_plans(client, person):
     assert owner.put("/settings/workflow", json={"steps": {"transfer": 2}}).json()["code"] == "no_feature"
     assert owner.get("/settings/workflow").json()["transfer"] == 1
     assert owner.post("/parcels/import/dxf", json={"content": "x"}).json()["code"] == "no_feature"
+
+
+def test_a_form_from_geohubs_land_template_needs_no_mapping(client, person):
+    org = str(uuid.uuid4())
+    reg = person(role="owner", name="Registrar Tola", org_id=org, features=FULL)
+    tform, tproject = str(uuid.uuid4()), str(uuid.uuid4())
+    fields = [{"id": i, "label": i, "type": "text"} for i in ("plot_no", "address", "locality", "land_use", "occupant_kind", "occupant_name",
+                                                                "occupant_phone", "occupant_nin", "occupant_rc", "acquired", "acquired_year",
+                                                                "documents", "dispute", "dispute_note", "remarks")]
+    HUB.projects = [{"id": tproject, "name": "Kuje plots", "description": "", "role": "owner", "forms": [
+        {"id": tform, "name": "Plot enumeration", "geometry_type": "area", "version": 1, "features": 2, "approved": 2, "fields": fields,
+         "template": "land_enumeration"}]}]
+    s = reg.post("/enumeration/sources", json={"project_id": tproject, "form_id": tform}).json()
+    assert s["field_map"]["claimant_name"] == "occupant_name" and s["field_map"]["notes"] == "remarks"
+
+    def feat(seq, lon, **props):
+        fid = str(uuid.uuid4())
+        HUB.features[fid] = {"id": fid, "form_id": tform, "seq": seq, "status": "approved", "version": 1, "form_version": 1,
+                             "geometry": square(lon, 8.9), "properties": props, "review_note": None, "reviewed_at": None,
+                             "created_at": "2026-11-02T08:00:00Z", "updated_at": None, "created_by_name": "Uche", "reviewed_by_name": "Ada"}
+        return fid
+    a = feat(1, 7.20, plot_no="4", land_use="Commercial", occupant_kind="Company", occupant_name="Kuje Traders Ltd", occupant_rc="RC123456",
+             acquired="Purchase", acquired_year=2019.0, documents=["Survey plan", "Deed of assignment"], dispute=False, remarks="Shop front")
+    b = feat(2, 7.21, plot_no="5", land_use="Residential", occupant_kind="Person", occupant_name="Bala Kuje", occupant_nin="22233344455",
+             dispute=True, dispute_note="A cousin claims half")
+    res = {r["id"]: r for r in reg.post(f"/enumeration/sources/{s['id']}/import", json={"feature_ids": [a, b], "lodge_claims": True}).json()}
+    assert res[a]["claim"]["ok"] and not res[b]["claim"]["ok"] and "dispute" in res[b]["claim"]["problems"][0]
+    pa = reg.get(f"/parcels/{res[a]['parcel_id']}").json()
+    assert pa["land_use"] == "commercial" and pa["address"] == "Plot 4"
+    assert "Acquired by purchase in 2019. Documents held: Survey plan, Deed of assignment.\nShop front" in pa["notes"]
+    pb = reg.get(f"/parcels/{res[b]['parcel_id']}").json()
+    assert "Disputed: A cousin claims half." in pb["notes"]
+    grant = next(i for i in reg.get("/instruments").json() if i["pin"] == res[a]["pin"])
+    party = grant["data"]["holders"][0]["party"]
+    assert party["kind"] == "company" and party["id_type"] == "RC" and party["id_no"] == "RC123456"
+    # the disputed claim stays out of "lodge claims waiting" too
+    assert all(not x["ok"] for x in reg.post(f"/enumeration/sources/{s['id']}/claims").json())
+
+def test_plots_plotted_from_their_survey_plan_are_recomputed_here(client, person):
+    import json
+    org = str(uuid.uuid4())
+    reg = person(role="owner", name="Registrar Plan", org_id=org, features=FULL)
+    form, project = str(uuid.uuid4()), str(uuid.uuid4())
+    HUB.projects = [{"id": project, "name": "Plans", "description": "", "role": "owner", "forms": [
+        {"id": form, "name": "Plot enumeration", "geometry_type": "area", "version": 1, "features": 2, "approved": 2,
+         "fields": [{"id": "plot_no", "label": "Plot number", "type": "text"}], "template": "land_enumeration"}]}]
+    s = reg.post("/enumeration/sources", json={"project_id": project, "form_id": form}).json()
+
+    def feat(seq, plan, geometry):
+        fid = str(uuid.uuid4())
+        HUB.features[fid] = {"id": fid, "form_id": form, "seq": seq, "status": "approved", "version": 1, "form_version": 1, "geometry": geometry,
+                             "properties": {"plot_no": str(seq), "gps_src": "plan", "plan_json": json.dumps(plan)}, "review_note": None,
+                             "reviewed_at": None, "created_at": "2026-11-06T08:00:00Z", "updated_at": None, "created_by_name": "Uche", "reviewed_by_name": None}
+        return fid
+    legs = [[89, 59, 50, 30.0], [180, 0, 10, 20.01], [270, 0, 0, 30.0], [0, 0, 0, 20.0]]
+    plan = {"v": 1, "grid": 26332, "method": "traverse", "start": [334000, 995000], "legs": legs, "ratio": 11628, "misclosure_m": 0.009}
+    # the polygon the phone sent is elsewhere: the plan decides
+    a = feat(1, plan, square(7.0, 9.0))
+    bad = feat(2, {**plan, "start": [334100, 995000], "legs": [[90, 0, 0, 30], [180, 0, 0, 20], [270, 0, 0, 30], [0, 0, 0, 12]]}, square(7.1, 9.0))
+    rows = {f["id"]: f for f in reg.get(f"/enumeration/sources/{s['id']}/features").json()["features"]}
+    assert rows[a]["located_by"] == "plan"
+    chk = {c["id"]: c for c in reg.post(f"/enumeration/sources/{s['id']}/check", json={"feature_ids": [a, bad]}).json()}
+    assert chk[a]["ok"] and chk[a]["method"] == "traverse" and chk[a]["closure"]["ratio"] > 10000 and 595 < chk[a]["area_sqm"] < 605
+    assert not chk[bad]["ok"] and "does not close" in " ".join(chk[bad]["problems"])
+    res = {r["id"]: r for r in reg.post(f"/enumeration/sources/{s['id']}/import", json={"feature_ids": [a, bad]}).json()}
+    assert res[a]["ok"] and not res[bad]["ok"]
+    p = reg.get(f"/parcels/{res[a]['parcel_id']}").json()
+    assert p["method"] == "traverse" and p["source_epsg"] == 26332 and p["closure_ratio"] > 10000
+    assert abs(p["lon"] - 7.4898) < 0.002 and abs(p["lat"] - 9.0001) < 0.002          # where the plan puts it, not where the phone drew it
+    assert p["beacons"][0]["easting"] == 334000.0
