@@ -15,14 +15,21 @@ const LEG = 5, POINT = 3;
 const blank = (n: number, cols: number): Row[] => Array.from({ length: n }, () => Array(cols).fill(""));
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s.replace(/,/g, "")));
 
-export function CheckResult({ c }: { c: Check }) {
+export function CheckResult({ c, onUseFix }: { c: Check; onUseFix?: (leg: number, bearingDms: string, distance: number) => void }) {
   const cl = c.closure;
+  const fix = cl?.suspect;
   return (
     <>
       <div className={`verdict ${c.ok ? "is-ok" : "is-bad"}`} role="status">
         <strong>{c.ok ? "This parcel can be registered" : "This parcel cannot be registered yet"}</strong>
         {!c.ok && <ul>{c.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
       </div>
+      {fix && onUseFix && (
+        <div className="warnings" role="note">
+          <p style={{ margin: 0 }}>Leg {fix.leg} as <strong>{fix.bearing_dms} {fix.distance_m.toFixed(2)} m</strong> closes the traverse and gives the plan's area ({area(fix.area_sqm)}). Check that leg on the plan or with the surveyor before you change it.</p>
+          <Button small onClick={() => onUseFix(fix.leg, fix.bearing_dms, fix.distance_m)}>Use these figures for leg {fix.leg}</Button>
+        </div>
+      )}
       {c.warnings.length > 0 && <div className="warnings"><ul>{c.warnings.map((w) => <li key={w}>{w}</li>)}</ul></div>}
       <dl className="facts">
         <dt>Area</dt><dd>{area(c.area_sqm)}{c.area_sqm >= 10000 ? "" : ` (${c.area_ha} ha)`}</dd>
@@ -50,6 +57,7 @@ export default function NewParcelPage({ me }: { me: Me }) {
   const [method, setMethod] = useState<Method>("traverse");
   const [epsg, setEpsg] = useState<number | null>(null);
   const [start, setStart] = useState<[string, string]>(["", ""]);          // the starting point's easting and northing
+  const [planArea, setPlanArea] = useState("");                             // the area printed on the plan, to find a misread leg
   const [legs, setLegs] = useState<Row[]>(blank(4, LEG));
   const [points, setPoints] = useState<Row[]>(blank(4, POINT));
   const [paste, setPaste] = useState("");
@@ -74,6 +82,12 @@ export default function NewParcelPage({ me }: { me: Me }) {
     if (label) setD((x) => ({ ...x, address: x.address || label }));
     setCheck(null);
   };
+  /** Put a suggested closing bearing and distance into the k-th filled leg (1-based). */
+  const applyFix = (leg: number, bearingDms: string, distance: number) => {
+    const at = legs.map((r, i) => (r.some((x) => x.trim()) ? i : -1)).filter((i) => i >= 0)[leg - 1];
+    if (at == null) return;
+    setLegs(legs.map((r, i) => (i === at ? [r[0], ...splitBearing(bearingDms), distance.toFixed(2)] : r)));
+  };
   useEffect(() => { if (settings.data && epsg == null) setEpsg(settings.data.default_epsg); }, [settings.data, epsg]);
 
   const rows = method === "traverse" ? legs : points;
@@ -89,14 +103,15 @@ export default function NewParcelPage({ me }: { me: Me }) {
         if (!(num(r[4]) > 0)) return `Leg ${i + 1} needs a distance.`;
       }
       return { method, epsg: epsg ?? undefined, start: { beacon: "", easting: num(e), northing: num(n) },
-        legs: filled.map((r) => ({ beacon: r[0].trim(), bearing: joinBearing(r[1], r[2], r[3])!, distance_m: num(r[4]) })) };
+        legs: filled.map((r) => ({ beacon: r[0].trim(), bearing: joinBearing(r[1], r[2], r[3])!, distance_m: num(r[4]) })),
+        plan_area_sqm: num(planArea) > 0 ? num(planArea) : undefined };
     }
     if (filled.length < 3) return "A parcel needs at least 3 beacons.";
     for (const [i, r] of filled.entries()) {
       if (!Number.isFinite(num(r[1])) || !Number.isFinite(num(r[2]))) return `Beacon ${i + 1} needs both coordinates.`;
     }
     return { method, epsg: epsg ?? undefined, points: filled.map((r) => ({ beacon: r[0].trim(), x: num(r[1]), y: num(r[2]) })) };
-  }, [method, epsg, start, rows]);
+  }, [method, epsg, start, rows, planArea]);
   const key = typeof body === "string" ? "" : JSON.stringify(body);
   const fresh = check && check.for === key ? check.c : null;
 
@@ -164,6 +179,7 @@ export default function NewParcelPage({ me }: { me: Me }) {
                 <legend>Starting point</legend>
                 <div className="ge-field"><label htmlFor="se">Easting (m)</label><input id="se" inputMode="decimal" value={start[0]} onChange={(e) => setStart([e.target.value, start[1]])} /></div>
                 <div className="ge-field"><label htmlFor="sn">Northing (m)</label><input id="sn" inputMode="decimal" value={start[1]} onChange={(e) => setStart([start[0], e.target.value])} /></div>
+                <div className="ge-field"><label htmlFor="parea">Area on the plan (m², optional)</label><input id="parea" inputMode="decimal" value={planArea} onChange={(e) => setPlanArea(e.target.value)} /></div>
               </fieldset>
             )}
             <div>
@@ -235,7 +251,7 @@ export default function NewParcelPage({ me }: { me: Me }) {
           <ErrorText error={err} />
           {check ? <>
             {!fresh && <p className="ge-small ge-muted">The survey has changed since this check. Check it again before registering.</p>}
-            <CheckResult c={check.c} />
+            <CheckResult c={check.c} onUseFix={applyFix} />
           </> : <p className="ge-muted">Check the boundary to see its area, how well it closes, and whether it overlaps a registered parcel.</p>}
           <div className="actions">
             <Button variant="primary" busy={busy === "register"} disabled={!fresh?.ok || !me.can_write} onClick={register}>

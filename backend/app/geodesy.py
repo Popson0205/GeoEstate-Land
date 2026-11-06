@@ -249,3 +249,38 @@ def fit(method: str, control: list[dict]) -> Correction:
     c.residuals = res
     c.rms_m = math.sqrt(sum(r["d"] ** 2 for r in res) / len(res))
     return c
+
+
+# ---------- when a traverse does not close: which leg is off? ----------
+def _plane_area(start, legs):
+    e, n = start
+    pts = [(e, n)]
+    for b, d in legs:
+        e += d * math.sin(math.radians(b))
+        n += d * math.cos(math.radians(b))
+        pts.append((e, n))
+    return abs(sum(pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1] for i in range(len(pts) - 1))) / 2
+
+
+def leg_fixes(legs: list[tuple[float, float]], plan_area: float | None = None) -> dict:
+    """For each leg, the bearing and distance that would make the traverse close exactly if every other leg were right,
+    and the area that would give. A misread figure is usually in one leg: the one whose fix gives the area printed on
+    the plan is the one to check (or, without the plan's area, the fix that changes the least)."""
+    fixes = []
+    for k in range(len(legs)):
+        e = sum(d * math.sin(math.radians(b)) for i, (b, d) in enumerate(legs) if i != k)
+        n = sum(d * math.cos(math.radians(b)) for i, (b, d) in enumerate(legs) if i != k)
+        b = math.degrees(math.atan2(-e, -n)) % 360
+        dist = math.hypot(e, n)
+        trial = list(legs)
+        trial[k] = (b, dist)
+        db = abs((b - legs[k][0] + 180) % 360 - 180)
+        fixes.append({"leg": k + 1, "bearing": round(b, 6), "bearing_dms": dms(b), "distance_m": round(dist, 2),
+                      "area_sqm": round(_plane_area((0, 0), trial), 2), "bearing_change_deg": round(db, 4),
+                      "distance_change_m": round(dist - legs[k][1], 2)})
+    out = {"fixes": fixes, "suspect": None, "by": None}
+    if plan_area:
+        near = [f for f in fixes if abs(f["area_sqm"] - plan_area) <= max(0.5, plan_area * 0.002)]
+        if len(near) == 1:
+            out["suspect"], out["by"] = near[0], "area"
+    return out

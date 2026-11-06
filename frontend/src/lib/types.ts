@@ -13,7 +13,8 @@ export interface OrgSettings { org_id: string; org_name: string; default_epsg: n
 export interface Beacon { seq: number; name: string; easting: number | null; northing: number | null; lon: number; lat: number }
 export interface Check {
   ok: boolean; problems: string[]; warnings: string[]; method: "traverse" | "coordinates"; epsg: number; grid_name: string;
-  closure: { misclosure_m: number; misclosure_e: number; misclosure_n: number; perimeter_m: number; ratio: number | null; required_ratio: number; adjusted: boolean } | null;
+  closure: { misclosure_m: number; misclosure_e: number; misclosure_n: number; perimeter_m: number; ratio: number | null; required_ratio: number; adjusted: boolean;
+    fixes?: LegFix[]; suspect?: LegFix | null } | null;
   legs: { bearing: number; bearing_dms: string; distance_m: number }[]; area_sqm: number; area_ha: number; perimeter_m: number;
   geometry: GeoJSON.Polygon; beacons: Beacon[]; overlaps: { id: string; pin: string; overlap_sqm: number }[]; correction: Correction | null;
 }
@@ -90,3 +91,6 @@ export interface EnumFeature { id: string; seq: number; status: string; version:
 export interface EnumResult { id: string; ok: boolean; problems?: string[]; warnings?: string[]; area_sqm?: number; pin?: string; parcel_id?: string;
   closure?: { ratio: number | null } | null;
   status?: string; claim?: { ok: boolean; number?: string; status?: string; problems?: string[] } }
+
+/** The bearing and distance that would close a traverse if only this leg were wrong, and the area that would give. */
+export interface LegFix { leg: number; bearing: number; bearing_dms: string; distance_m: number; area_sqm: number; bearing_change_deg: number; distance_change_m: number }
