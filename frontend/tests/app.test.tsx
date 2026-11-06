@@ -107,13 +107,14 @@ describe("Land Registry", () => {
     const register = screen.getByRole("button", { name: "Register and give it a PIN" }) as HTMLButtonElement;
     expect(register.disabled).toBe(true);
     type("Easting (m)", "331600"); type("Northing (m)", "993000");
-    [["90", "30"], ["180", "20"], ["270", "30"], ["0", "20"]].forEach(([b, d], i) => { type(`Bearing ${i + 1}`, b); type(`Distance (m) ${i + 1}`, d); });
+    [["90", "30"], ["180", "20"], ["270", "30"], ["0", "20"]].forEach(([b, d], i) => { type(`Degrees ${i + 1}`, b); type(`Distance (m) ${i + 1}`, d); });
+    type("Minutes 1", "30"); type("Seconds 1", "15");
     fireEvent.click(screen.getByRole("button", { name: "Check the boundary" }));
     expect(await screen.findByText("This parcel can be registered")).toBeTruthy();
     expect(screen.getByText(/1 in 25,001/)).toBeTruthy();
     const sent = calls.find((c) => c.path === "/parcels/check")!;
     expect(sent.body).toEqual({ method: "traverse", epsg: 26332, start: { beacon: "", easting: 331600, northing: 993000 },
-      legs: [{ beacon: "", bearing: "90", distance_m: 30 }, { beacon: "", bearing: "180", distance_m: 20 }, { beacon: "", bearing: "270", distance_m: 30 }, { beacon: "", bearing: "0", distance_m: 20 }] });
+      legs: [{ beacon: "", bearing: "90°30'15\"", distance_m: 30 }, { beacon: "", bearing: "180°0'0\"", distance_m: 20 }, { beacon: "", bearing: "270°0'0\"", distance_m: 30 }, { beacon: "", bearing: "0°0'0\"", distance_m: 20 }] });
     expect(sent.headers["X-GeoEstate"]).toBe("1");
     // changing the survey after the check means checking again
     type("Distance (m) 4", "19");

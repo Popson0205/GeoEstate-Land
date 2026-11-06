@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { area, parseRows } from "../src/lib/format";
+import { area, joinBearing, parseRows, splitBearing } from "../src/lib/format";
 import { licenceNotice } from "../src/components/Bar";
 
 describe("parseRows", () => {
@@ -26,5 +26,21 @@ describe("words", () => {
     expect(licenceNotice({ ...p, status: "active" })).toBeNull();
     expect(licenceNotice({ ...p, status: "grace" })?.text).toMatch(/ended on 31 October 2026.*until 30 November 2026/);
     expect(licenceNotice({ ...p, status: "expired" })?.tone).toBe("bad");
+  });
+});
+
+describe("bearings in degrees, minutes and seconds", () => {
+  it("splits what surveyors write", () => {
+    expect(splitBearing(`123°30'15"`)).toEqual(["123", "30", "15"]);
+    expect(splitBearing("123 30 15")).toEqual(["123", "30", "15"]);
+    expect(splitBearing("123-30")).toEqual(["123", "30", ""]);
+    expect(splitBearing("123.5")).toEqual(["123", "30", "0"]);
+  });
+  it("joins them for the survey engine, refusing what is out of range", () => {
+    expect(joinBearing("90", "", "")).toBe(`90°0'0"`);
+    expect(joinBearing("359", "59", "59.5")).toBe(`359°59'59.5"`);
+    expect(joinBearing("360", "0", "0")).toBeNull();
+    expect(joinBearing("12", "60", "0")).toBeNull();
+    expect(joinBearing("", "1", "1")).toBeNull();
   });
 });

@@ -43,3 +43,22 @@ export const STATUS_TONE: Record<string, string> = { lodged: "ge-badge-info", re
 export const STATUS_NAME: Record<string, string> = { lodged: "Lodged", registered: "Registered", rejected: "Rejected", withdrawn: "Withdrawn" };
 export const ENC_NAME: Record<string, string> = { mortgage: "Mortgage", caveat: "Caveat", lease: "Lease" };
 export const PARTY_KIND: Record<string, string> = { person: "Person", company: "Company", government: "Government", community: "Community or family", trustees: "Trustees" };
+
+/** A bearing as degrees, minutes and seconds, from 123°30'15", 123 30 15, 123-30-15 or 123.5 (decimal degrees). */
+export function splitBearing(text: string): [string, string, string] {
+  const t = text.trim().replace(/º/g, "°");
+  if (/^\d{1,3}(\.\d+)?$/.test(t) && t.includes(".")) {
+    const total = Math.round(Number(t) * 3600);
+    return [String(Math.floor(total / 3600)), String(Math.floor((total % 3600) / 60)), String(total % 60)];
+  }
+  const parts = t.split(/[°'′"″\s-]+/).filter(Boolean);
+  return [parts[0] ?? "", parts[1] ?? "", parts[2] ?? ""];
+}
+
+/** Degrees, minutes and seconds as the API takes a bearing (123°30'15"); an empty minute or second is 0. */
+export function joinBearing(d: string, m: string, s: string): string | null {
+  const D = d.trim(), M = m.trim() || "0", S = s.trim() || "0";
+  if (!/^\d{1,3}$/.test(D) || !/^\d{1,2}$/.test(M) || !/^\d{1,2}(\.\d+)?$/.test(S)) return null;
+  if (Number(D) >= 360 || Number(M) >= 60 || Number(S) >= 60) return null;
+  return `${D}°${M}'${S}"`;
+}
