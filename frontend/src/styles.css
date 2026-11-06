@@ -50,7 +50,7 @@
 
 /* the map */
 .map { width: 100%; border-radius: var(--ge-r); overflow: hidden; border: 1px solid var(--ge-line); background: #e8ecf2; }
-.map-page .map { height: calc(100vh - 200px) !important; min-height: 420px; }
+.map-page .map { min-height: 420px; }
 
 /* the check's verdict */
 .verdict { border-radius: var(--ge-r); padding: 14px 16px; margin-bottom: 14px; }
@@ -135,3 +135,8 @@ input.share { width: 90px; min-height: 34px; padding: 4px 8px; border: 1px solid
 label.ge-btn { cursor: pointer; }
 input.sr-only:focus-visible + *, label.ge-btn:focus-within { outline: 2px solid var(--ge-green); }
 .row-ok { color: var(--ge-green-ink); } .row-bad { color: var(--ge-bad); }
+.map-box { position: relative; width: 100%; }
+.map-page .map-box { height: calc(100vh - 200px) !important; min-height: 420px; }
+.basemap-switch { position: absolute; top: 10px; left: 10px; z-index: 2; display: inline-flex; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.18); overflow: hidden; }
+.basemap-switch button { border: 0; background: transparent; padding: 6px 12px; font: 600 13px var(--ge-font); color: var(--ge-muted); cursor: pointer; min-height: 32px; }
+.basemap-switch button[aria-pressed="true"] { background: var(--ge-navy); color: #fff; }

@@ -1,8 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl, { type ExpressionSpecification, type GeoJSONSource, type LngLatBoundsLike, type Map as MlMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-const BASEMAP = import.meta.env.VITE_BASEMAP_URL || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+// OpenStreetMap's own tile servers refuse apps (403 "Access blocked"), so the maps come from Esri's, which need no key.
+// VITE_BASEMAP_URL replaces the street map (e.g. a MapTiler or Stadia address with your key).
+const STREETS = import.meta.env.VITE_BASEMAP_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
+const IMAGERY = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const credit = (u: string) => (/arcgis|esri/i.test(u) ? "Esri, Maxar, Earthstar Geographics, HERE, Garmin, © OpenStreetMap contributors" : "© OpenStreetMap contributors");
+type Base = "streets" | "imagery";
+const SAVED = "land.basemap";
 const NAVY = "#1b2b5e", GREEN = "#2f8a34", RED = "#b42318", AMBER = "#b07800";
 const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 const one = (g?: GeoJSON.Polygon | null): GeoJSON.FeatureCollection => (g ? { type: "FeatureCollection", features: [{ type: "Feature", geometry: g, properties: {} }] } : empty);
@@ -28,6 +34,9 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
   line?: [number, number][]; onMapClick?: (lonlat: [number, number]) => void; fit?: boolean;
 }) {
   const el = useRef<HTMLDivElement>(null);
+  const [base, setBase] = useState<Base>(() => { try { return (localStorage.getItem(SAVED) as Base) === "imagery" ? "imagery" : "streets"; } catch { return "streets"; } });
+  const baseRef = useRef(base);
+  baseRef.current = base;
   const map = useRef<MlMap | null>(null);
   const ready = useRef(false);
   const latest = useRef({ fabric, focus, preview, previewOk, line });
@@ -60,8 +69,10 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
     const m = new maplibregl.Map({
       container: el.current, attributionControl: { compact: true },
       style: { version: 8, glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-        sources: { base: { type: "raster", tiles: [BASEMAP], tileSize: 256, attribution: "© OpenStreetMap contributors", maxzoom: 19 } },
-        layers: [{ id: "base", type: "raster", source: "base" }] },
+        sources: { base: { type: "raster", tiles: [STREETS], tileSize: 256, attribution: credit(STREETS), maxzoom: 19 },
+          imagery: { type: "raster", tiles: [IMAGERY], tileSize: 256, attribution: credit(IMAGERY), maxzoom: 19 } },
+        layers: [{ id: "base", type: "raster", source: "base", layout: { visibility: baseRef.current === "streets" ? "visible" : "none" } },
+          { id: "imagery", type: "raster", source: "imagery", layout: { visibility: baseRef.current === "imagery" ? "visible" : "none" } }] },
       center: [8.0, 9.0], zoom: 5.2,
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -98,5 +109,21 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
   useEffect(paint, [fabric, focus, preview, previewOk, line]);
   useEffect(() => { const c = map.current?.getCanvas(); if (c) c.style.cursor = onMapClick ? "crosshair" : ""; }, [onMapClick]);
 
-  return <div ref={el} className="map" style={{ height }} role="region" aria-label={label} />;
+  useEffect(() => {
+    const m = map.current;
+    try { localStorage.setItem(SAVED, base); } catch { /* private window */ }
+    if (!m || !ready.current) return;
+    m.setLayoutProperty("base", "visibility", base === "streets" ? "visible" : "none");
+    m.setLayoutProperty("imagery", "visibility", base === "imagery" ? "visible" : "none");
+  }, [base]);
+
+  return (
+    <div className="map-box" style={{ height }}>
+      <div ref={el} className="map" style={{ height: "100%" }} role="region" aria-label={label} />
+      <div className="basemap-switch" role="group" aria-label="Background map">
+        <button type="button" aria-pressed={base === "streets"} onClick={() => setBase("streets")}>Map</button>
+        <button type="button" aria-pressed={base === "imagery"} onClick={() => setBase("imagery")}>Satellite</button>
+      </div>
+    </div>
+  );
 }
