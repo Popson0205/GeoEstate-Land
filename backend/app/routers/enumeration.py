@@ -229,7 +229,8 @@ def capture(geometry: dict, props: dict | None = None) -> CaptureIn:
         if plan["method"] == "traverse":
             e, n = plan["start"]
             return CaptureIn(method="traverse", epsg=plan["grid"], start={"beacon": "", "easting": e, "northing": n},
-                             legs=[{"beacon": "", "bearing": f"{int(d)}°{int(m)}'{s}\"", "distance_m": L} for d, m, s, L in plan["legs"]])
+                             legs=[{"beacon": "", "bearing": f"{int(d)}°{int(m)}'{s}\"", "distance_m": L} for d, m, s, L in plan["legs"]],
+                             plan_area_sqm=plan.get("plan_area") if isinstance(plan.get("plan_area"), (int, float)) else None)
         return CaptureIn(method="coordinates", epsg=plan["grid"], points=[{"x": x, "y": y} for x, y in plan["points"]])
     pts = ring(geometry)
     if len(pts) > 1 and pts[0] == pts[-1]:

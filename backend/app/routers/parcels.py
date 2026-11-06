@@ -105,6 +105,7 @@ class CaptureIn(BaseModel):
     start: Start | None = None
     legs: list[Leg] = Field(default_factory=list, max_length=200)
     points: list[Point] = Field(default_factory=list, max_length=500)
+    plan_area_sqm: float | None = Field(None, gt=0, lt=1e9, description="The area printed on the survey plan, to compare and to find a misread leg")
 
 
 class ParcelIn(CaptureIn):
@@ -139,6 +140,16 @@ async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -
         if t.ratio is not None and t.ratio < s["closure_ratio"]:
             problems.append(f"The traverse does not close: it misses by {t.misclosure_m:.2f} m, 1 in {t.ratio:,}. "
                             f"This registry needs 1 in {s['closure_ratio']:,} or better. Check the bearings and distances.")
+            diag = geodesy.leg_fixes([(geodesy.parse_bearing(l.bearing), l.distance_m) for l in body.legs], body.plan_area_sqm)
+            closure["fixes"] = diag["fixes"]
+            closure["suspect"] = diag["suspect"]
+            if diag["suspect"]:
+                f = diag["suspect"]
+                problems.append(f"Leg {f['leg']} is the one to check: {f['bearing_dms']} and {f['distance_m']:.2f} m would close the traverse "
+                                f"and give the plan's area of {body.plan_area_sqm:,.2f} m². Compare those figures with the plan, or with the "
+                                f"beacons' coordinates if the plan lists them.")
+            elif not body.plan_area_sqm:
+                problems.append("Give the area printed on the plan to find which leg is off.")
         grid_pts = t.points
         names = [body.start.beacon] + [l.beacon for l in body.legs[:-1]]
         legs = t.legs
@@ -162,6 +173,8 @@ async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -
         lonlat = geodesy.to_wgs84(grid_pts, epsg)
     b = geodesy.boundary(lonlat)
     problems += b.problems
+    if body.plan_area_sqm and not problems and abs(b.area_sqm - body.plan_area_sqm) > max(1.0, body.plan_area_sqm * 0.005):
+        warnings.append(f"The plan gives {body.plan_area_sqm:,.2f} m²; these figures give {b.area_sqm:,.2f} m². Check the plan.")
     overlaps = []
     if not b.problems:
         cur = await conn.execute(

@@ -35,6 +35,7 @@ export interface CaptureBody {
   start?: { easting: number; northing: number; beacon: string };
   legs?: { bearing: string; distance_m: number; beacon: string }[];
   points?: { x: number; y: number; beacon: string }[];
+  plan_area_sqm?: number;
 }
 export type ParcelDetails = { land_use?: string; address?: string; locality?: string; notes?: string; survey_plan_no?: string; surveyor?: string; survey_date?: string | null };
 
