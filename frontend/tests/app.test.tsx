@@ -317,4 +317,22 @@ describe("Land Registry", () => {
     fireEvent.click(screen.getByRole("button", { name: "Register 1 plot" }));
     await waitFor(() => expect(calls.find((c) => c.path === "/enumeration/sources/s1/import")?.body).toEqual({ feature_ids: ["f1"], lodge_claims: true }));
   });
+
+  it("matches a form made from Geohub's Plot enumeration template by itself", async () => {
+    routes["GET /enumeration/sources"] = ok([]);
+    routes["GET /enumeration/geohub"] = ok([{ id: "pr1", name: "Kuje plots", description: "", role: "admin", forms: [{ id: "fo9", name: "Plot enumeration",
+      geometry_type: "area", version: 1, features: 2, approved: 2, template: "land_enumeration",
+      fields: [{ id: "plot_no", label: "Plot number", type: "text" }, { id: "occupant_name", label: "Full name", type: "text" }, { id: "remarks", label: "Remarks", type: "text" }] }] }]);
+    routes["POST /enumeration/sources"] = (b) => [201, { id: "s9", ...(b as object) }];
+    routes["GET /enumeration/sources/s9"] = ok({ id: "s9", project_id: "pr1", project_name: "Kuje plots", form_id: "fo9", form_name: "Plot enumeration", field_map: {}, defaults: {},
+      created_by_name: "Musa Bello", created_at: "", imported: 0, claims_lodged: 0, form: null });
+    routes["GET /enumeration/sources/s9/features?status=approved&after=0"] = ok({ features: [], next: null });
+    open("/enumeration");
+    fireEvent.click(await screen.findByRole("button", { name: "Connect a Geohub form" }));
+    fireEvent.change(await screen.findByLabelText("Geohub form"), { target: { value: "pr1/fo9" } });
+    expect(screen.getByText(/every question is matched already/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Connect the form" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/enumeration/sources")?.body).toMatchObject({
+      field_map: { plot_no: "plot_no", claimant_name: "occupant_name", notes: "remarks", dispute: "dispute", claimant_kind: "occupant_kind" } }));
+  });
 });

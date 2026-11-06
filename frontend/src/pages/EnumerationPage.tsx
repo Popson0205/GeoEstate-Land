@@ -8,9 +8,18 @@ import { useLoad } from "../lib/useLoad";
 
 export const MEANINGS: [string, string][] = [["plot_no", "Plot number"], ["address", "Address or description"], ["locality", "Locality"],
   ["land_use", "Land use"], ["notes", "Notes"], ["claimant_name", "Occupant's (claimant's) name"], ["claimant_phone", "Occupant's phone"],
-  ["claimant_id_no", "Occupant's NIN"]];
+  ["claimant_id_no", "Occupant's NIN"], ["claimant_kind", "Occupant is a person, company…"], ["claimant_rc", "Occupant's CAC RC number"],
+  ["acquired", "How it was acquired"], ["acquired_year", "Year acquired"], ["documents", "Documents held"], ["dispute", "Disputed (yes / no)"],
+  ["dispute_note", "Who disputes it, and why"]];
+/** Geohub's ready-made Plot enumeration form: the same question ids every time. */
+export const TEMPLATE_MAP: Record<string, Record<string, string>> = { land_enumeration: {
+  plot_no: "plot_no", address: "address", locality: "locality", land_use: "land_use", notes: "remarks", claimant_name: "occupant_name",
+  claimant_phone: "occupant_phone", claimant_id_no: "occupant_nin", claimant_kind: "occupant_kind", claimant_rc: "occupant_rc",
+  acquired: "acquired", acquired_year: "acquired_year", documents: "documents", dispute: "dispute", dispute_note: "dispute_note" } };
 const GUESS: Record<string, RegExp> = { plot_no: /plot|parcel\s*no/i, address: /address|street/i, locality: /locality|community|village|town|lga/i,
-  land_use: /use/i, notes: /remark|note|comment/i, claimant_name: /occupant|owner|claimant|name/i, claimant_phone: /phone|tel/i, claimant_id_no: /nin|national id/i };
+  land_use: /use/i, notes: /remark|note|comment/i, claimant_name: /occupant|owner|claimant|name/i, claimant_phone: /phone|tel/i, claimant_id_no: /nin|national id/i,
+  claimant_kind: /occupant (is|type)|owner type/i, claimant_rc: /\brc\b|cac/i, acquired: /acquir/i, acquired_year: /year/i, documents: /document|papers/i,
+  dispute: /disput/i, dispute_note: /disput.*(why|note|who)/i };
 
 /** Questions → meanings: a select per meaning, guessed from the questions' labels to start with. */
 export function FieldMap({ form, value, onChange }: { form: GeohubForm; value: Record<string, string>; onChange: (m: Record<string, string>) => void }) {
@@ -26,6 +35,7 @@ export function FieldMap({ form, value, onChange }: { form: GeohubForm; value: R
 }
 
 export function guessMap(form: GeohubForm): Record<string, string> {
+  if (form.template && TEMPLATE_MAP[form.template]) return { ...TEMPLATE_MAP[form.template] };
   const used = new Set<string>(), out: Record<string, string> = {};
   for (const [k] of MEANINGS) {
     const f = form.fields.find((x) => !used.has(x.id) && GUESS[k].test(x.label));
@@ -45,8 +55,8 @@ function Connect({ onDone }: { onDone: (id: string) => void }) {
   const chosen = options.find((o) => `${o.p.id}/${o.f.id}` === pf);
   if (projects.error) return <ErrorText error={projects.error} />;
   if (!projects.data) return <p className="loading">Asking Geohub for your projects…</p>;
-  if (!options.length) return <p className="ge-muted">None of your Geohub projects has a published form that maps areas. Make one in Geohub (a form with
-    the shape “area”), publish it, and enumerate with it.</p>;
+  if (!options.length) return <p className="ge-muted">None of your Geohub projects has a published form that maps areas. In Geohub, open a project, choose
+    New form and start from <strong>Plot enumeration</strong> (for Land Registry), publish it, and enumerate with it.</p>;
   const save = async () => {
     if (!chosen) return;
     const got = await run("c", () => api.addSource({ project_id: chosen.p.id, form_id: chosen.f.id, field_map: map, defaults: def }), `${chosen.f.name} connected`);
@@ -59,8 +69,11 @@ function Connect({ onDone }: { onDone: (id: string) => void }) {
           <option value="">Choose…</option>
           {options.map(({ p, f }) => <option key={f.id} value={`${p.id}/${f.id}`}>{p.name} · {f.name} ({f.approved} approved of {f.features})</option>)}</select></div>
       {chosen && <>
-        <h3 className="ge-small" style={{ margin: 0 }}>Which question holds what</h3>
-        <FieldMap form={chosen.f} value={map} onChange={setMap} />
+        {chosen.f.template && TEMPLATE_MAP[chosen.f.template]
+          ? <details className="paste"><summary>Made from Geohub's Plot enumeration template: every question is matched already</summary>
+              <FieldMap form={chosen.f} value={map} onChange={setMap} /></details>
+          : <><h3 className="ge-small" style={{ margin: 0 }}>Which question holds what</h3>
+              <FieldMap form={chosen.f} value={map} onChange={setMap} /></>}
         <h3 className="ge-small" style={{ margin: 0 }}>When the form does not say</h3>
         <div className="form-grid">
           <div className="ge-field"><label htmlFor="dloc">Default locality</label><input id="dloc" value={def.locality} onChange={(e) => setDef({ ...def, locality: e.target.value })} /></div>

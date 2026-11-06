@@ -110,7 +110,8 @@ export default function EnumSourcePage({ me }: { me: Me }) {
                         onChange={(e) => setPick((p) => { const n = new Set(p); if (e.target.checked) n.add(f.id); else n.delete(f.id); return n; })} />}</td>
                       <td>{f.mapped.full_address || <span className="ge-muted">No plot number</span>}
                         <div className="ge-muted ge-small">{[f.created_by_name, day(f.created_at), f.status !== "approved" && STATUS_WORD[f.status]].filter(Boolean).join(" · ")}</div></td>
-                      <td>{f.mapped.claimant_name || <span className="ge-muted">—</span>}{f.mapped.claimant_phone && <div className="ge-muted ge-small">{f.mapped.claimant_phone}</div>}</td>
+                      <td>{f.mapped.claimant_name || <span className="ge-muted">—</span>}{f.mapped.claimant_phone && <div className="ge-muted ge-small">{f.mapped.claimant_phone}</div>}
+                        {f.mapped.dispute && <div><span className="ge-badge ge-badge-warn" title={f.mapped.dispute_note}>Disputed</span></div>}</td>
                       <td className="ge-small">{f.imported ? <>
                           <Link className="pin" to={`/parcels/${f.imported.parcel_id}`}>{f.imported.pin}</Link>
                           {f.imported.status === "pending" && <span className="ge-badge ge-badge-warn" style={{ marginLeft: 6 }}>Waiting</span>}

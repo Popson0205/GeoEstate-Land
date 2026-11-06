@@ -74,13 +74,15 @@ export interface DxfShape { index: number; layer: string; label: string; area_pl
 export interface DxfRead { filename: string; shapes: DxfShape[]; layers: string[]; texts: number }
 
 export interface GeohubField { id: string; label: string; type: string; choices?: string[] }
-export interface GeohubForm { id: string; name: string; geometry_type: string; version: number; features: number; approved: number; fields: GeohubField[] }
+export interface GeohubForm { id: string; name: string; geometry_type: string; version: number; features: number; approved: number; fields: GeohubField[];
+  template?: string | null }
 export interface GeohubProject { id: string; name: string; description: string; role: string; forms: GeohubForm[] }
 export interface EnumSource { id: string; project_id: string; project_name: string; form_id: string; form_name: string;
   field_map: Record<string, string>; defaults: Record<string, string>; created_by_name: string; created_at: string; imported: number; claims_lodged: number;
   form?: GeohubForm | null }
 export interface Mapped { plot_no: string; address: string; locality: string; land_use: string; notes: string; claimant_name: string;
-  claimant_phone: string; claimant_id_no: string; full_address: string }
+  claimant_phone: string; claimant_id_no: string; full_address: string;
+  claimant_kind?: string; dispute?: string; dispute_note?: string; tenure?: string }
 export interface EnumFeature { id: string; seq: number; status: string; version: number; geometry: GeoJSON.Geometry; created_by_name: string | null;
   created_at: string; reviewed_by_name: string | null; mapped: Mapped; properties: Record<string, unknown>; changed_since: boolean;
   imported: { parcel_id: string; pin: string; status: string; claim_number: string | null; claim_status: string | null; has_claim: boolean } | null }
