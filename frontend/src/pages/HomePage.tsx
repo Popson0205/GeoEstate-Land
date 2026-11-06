@@ -17,7 +17,8 @@ export function ParcelTable({ rows, empty }: { rows: ParcelRow[]; empty: string 
           {rows.map((p) => (
             <tr key={p.id} className="is-link" onClick={() => go(`/parcels/${p.id}`)}>
               <td><Link className="pin" to={`/parcels/${p.id}`} onClick={(e) => e.stopPropagation()}>{p.pin}</Link>
-                {p.status === "retired" && <> <span className="ge-badge ge-badge-bad">Retired</span></>}</td>
+                {p.status !== "active" && <> <span className={`ge-badge ${p.status === "pending" ? "ge-badge-warn" : "ge-badge-bad"}`}>
+                  {{ pending: "Waiting", retired: "Retired", rejected: "Rejected", active: "" }[p.status]}</span></>}</td>
               <td>{p.title_no ?? <span className="ge-muted">—</span>}</td>
               <td>{[p.address, p.locality].filter(Boolean).join(", ") || <span className="ge-muted">—</span>}</td>
               <td>{p.land_use || <span className="ge-muted">—</span>}</td>
@@ -54,7 +55,9 @@ export default function HomePage({ me }: { me: Me }) {
           <div className="stat"><span>Active parcels</span><strong>{h.active.toLocaleString("en-NG")}{h.limit != null && <small className="ge-muted ge-small"> of {h.limit.toLocaleString("en-NG")}</small>}</strong></div>
           <div className="stat"><span>Land registered</span><strong>{area(h.area_sqm)}</strong></div>
           <div className="stat"><span>Titled parcels</span><strong>{h.titled.toLocaleString("en-NG")}</strong></div>
-          <div className="stat"><span>Instruments waiting</span><strong>{h.lodged ? <Link to="/instruments">{h.lodged}</Link> : 0}</strong></div>
+          <div className="stat"><span>Waiting for a registrar</span><strong>{h.lodged + h.pending ? <>
+            {h.lodged > 0 && <Link to="/instruments">{h.lodged} instrument{h.lodged === 1 ? "" : "s"}</Link>}{h.lodged > 0 && h.pending > 0 && ", "}
+            {h.pending > 0 && <a href="#q" onClick={(e) => { e.preventDefault(); setStatus("pending"); setSearch({ q: "", status: "pending" }); }}>{h.pending} parcel{h.pending === 1 ? "" : "s"}</a>}</> : 0}</strong></div>
         </div>
       )}
       <form className="toolbar" role="search" onSubmit={submit}>
@@ -62,7 +65,8 @@ export default function HomePage({ me }: { me: Me }) {
         <input id="q" type="search" style={{ flex: "1 1 260px" }} placeholder="PIN, title number, proprietor, address, survey plan…" value={q} onChange={(e) => setQ(e.target.value)} />
         <label className="sr-only" htmlFor="status">Which parcels</label>
         <select id="status" value={status} onChange={(e) => { setStatus(e.target.value); setSearch({ q: q.trim(), status: e.target.value }); }}>
-          <option value="active">Active</option><option value="retired">Retired</option><option value="all">All</option>
+          <option value="active">Active</option><option value="pending">Waiting for approval</option><option value="retired">Retired</option>
+          <option value="rejected">Rejected</option><option value="all">All</option>
         </select>
         <button className="ge-btn" type="submit">Search</button>
       </form>

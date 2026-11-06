@@ -51,7 +51,7 @@ async def lookup(slug: str, request: Request, q: str = Query(min_length=3, max_l
     q = q.strip().upper()
     cur = await conn.execute(
         "SELECT p.id, p.pin, p.status, p.area_sqm, p.land_use, p.locality, ST_X(ST_Centroid(p.geom)) AS lon, ST_Y(ST_Centroid(p.geom)) AS lat "
-        "FROM parcels p WHERE p.org_id = %s AND (upper(p.pin) = %s OR EXISTS "
+        "FROM parcels p WHERE p.org_id = %s AND p.status IN ('active','retired') AND (upper(p.pin) = %s OR EXISTS "
         "  (SELECT 1 FROM titles t WHERE t.parcel_id = p.id AND upper(t.title_no) = %s))", (s["org_id"], q, q))
     p = await cur.fetchone()
     if not p:

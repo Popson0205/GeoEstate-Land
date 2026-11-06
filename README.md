@@ -35,8 +35,22 @@ LandCheck and FarmScan. One sign-in (GeoEstate ID, through Geohub), one licence 
 Licence features (from the organization's Land Registry plan in Geohub): `parcels`, `titles` (grants and revocations),
 `transactions` (transfers, mortgages, caveats, leases, discharges) and `public_lookup`.
 
-Coming next: DXF import, ground-control correction, split and merge, and approval workflows; enumeration forms in Geohub
-that feed the register.
+**Workflows, drawings, ground control, subdivision (part 3)**
+
+- **Each organization's workflow**: for a new parcel and for every kind of instrument, a registrar chooses whether it takes
+  effect when lodged, needs one registrar, or needs two different registrars (neither of them whoever lodged it). A parcel
+  waiting for approval holds its ground (nothing may overlap it) but takes no title until approved.
+- **DXF drawings**: a surveyor's DXF gives one parcel's boundary (closed polylines, with the beacon numbers written by the
+  corners), or a **whole layout** at once: every plot is read, checked and registered with its plot number as its address.
+- **Ground control**: control points whose true positions are known (e.g. by GNSS), against where the old plans put them,
+  per survey grid; the registry chooses a shift, a similarity (Helmert) or an affine correction, sees each one's residuals,
+  and from then on every survey on that grid is corrected (the plan's own figures are kept beside the corrected position).
+- **Subdivision and amalgamation** as instruments: a cut line drawn on the map (or given on the survey grid) divides a
+  parcel; neighbours that share a boundary become one. New PINs, beacons kept or numbered N1, N2…, the old parcels retired
+  with their lineage; titled land carries its proprietors, terms (ground rent apportioned by area) and encumbrances to
+  the new titles.
+
+Coming next: enumeration forms in Geohub that feed the register.
 
 ## Who can do what
 

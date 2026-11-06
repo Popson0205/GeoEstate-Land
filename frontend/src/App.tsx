@@ -16,6 +16,8 @@ import InstrumentsPage from "./pages/InstrumentsPage";
 import LodgePage from "./pages/LodgePage";
 import PartyPage from "./pages/PartyPage";
 import PublicLookupPage from "./pages/PublicLookupPage";
+import ControlPage from "./pages/ControlPage";
+import LayoutImportPage from "./pages/LayoutImportPage";
 
 /** Land Registry has no sign-in page of its own: someone not signed in goes to Geohub and comes straight back. */
 export default function App() {
@@ -57,6 +59,7 @@ export default function App() {
           <Route path="/" element={<HomePage me={me} />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/parcels/new" element={<NewParcelPage me={me} />} />
+          <Route path="/parcels/import" element={<LayoutImportPage me={me} />} />
           <Route path="/parcels/:id" element={<ParcelPage me={me} />} />
           <Route path="/parcels/:id/lodge" element={<LodgePage me={me} />} />
           <Route path="/parcels/:id/extract" element={<ExtractPage me={me} />} />
@@ -64,6 +67,7 @@ export default function App() {
           <Route path="/instruments/:id" element={<InstrumentPage me={me} />} />
           <Route path="/parties/:id" element={<PartyPage />} />
           <Route path="/settings" element={<SettingsPage me={me} />} />
+          <Route path="/settings/control" element={<ControlPage me={me} />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="*" element={<div className="ge-card"><h1>Not found</h1><p><a href="/">Back to the register</a></p></div>} />
         </Routes>

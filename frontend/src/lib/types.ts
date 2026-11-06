@@ -15,10 +15,12 @@ export interface Check {
   ok: boolean; problems: string[]; warnings: string[]; method: "traverse" | "coordinates"; epsg: number; grid_name: string;
   closure: { misclosure_m: number; misclosure_e: number; misclosure_n: number; perimeter_m: number; ratio: number | null; required_ratio: number; adjusted: boolean } | null;
   legs: { bearing: number; bearing_dms: string; distance_m: number }[]; area_sqm: number; area_ha: number; perimeter_m: number;
-  geometry: GeoJSON.Polygon; beacons: Beacon[]; overlaps: { id: string; pin: string; overlap_sqm: number }[];
+  geometry: GeoJSON.Polygon; beacons: Beacon[]; overlaps: { id: string; pin: string; overlap_sqm: number }[]; correction: Correction | null;
 }
+export interface Correction { method: string; method_name: string; shift_e: number; shift_n: number; rms_m: number; points: number; scale_ppm?: number; rotation_sec?: number }
 export interface ParcelRow {
-  id: string; pin: string; status: "active" | "retired"; area_sqm: string; perimeter_m: string; land_use: string; address: string; locality: string;
+  id: string; pin: string; status: "pending" | "active" | "retired" | "rejected"; decided_by_name: string | null; decided_at: string | null;
+  decision_note: string; correction: Correction | null; area_sqm: string; perimeter_m: string; land_use: string; address: string; locality: string;
   notes: string; method: string; source_epsg: number; closure_error_m: string | null; closure_ratio: number | null; survey_plan_no: string;
   surveyor: string; survey_date: string | null; retired_reason: string | null; created_by_name: string; created_at: string; updated_at: string;
   lon: number; lat: number; title_no: string | null;
@@ -26,11 +28,12 @@ export interface ParcelRow {
 export interface Parcel extends ParcelRow {
   geometry: GeoJSON.Polygon; grid_name: string; beacons: Beacon[]; neighbours: { id: string; pin: string; land_use: string }[];
   history: { at: string; actor_name: string; action: string; details: Record<string, unknown> }[];
+  parents: { id: string; pin: string; number: string; kind: string }[]; children: { id: string; pin: string; number: string; kind: string }[];
 }
-export interface Home { active: number; retired: number; area_sqm: number; this_month: number; titled: number; lodged: number; latest: ParcelRow[]; limit: number | null; settings: OrgSettings }
+export interface Home { pending: number; active: number; retired: number; area_sqm: number; this_month: number; titled: number; lodged: number; latest: ParcelRow[]; limit: number | null; settings: OrgSettings }
 export interface AuditEntry { id: number; at: string; actor_name: string | null; action: string; target_type: string | null; target_id: string | null; details: Record<string, unknown> }
 
-export type InstrumentKind = "grant" | "transfer" | "mortgage" | "caveat" | "lease" | "discharge" | "revocation";
+export type InstrumentKind = "grant" | "transfer" | "mortgage" | "caveat" | "lease" | "discharge" | "revocation" | "subdivision" | "amalgamation";
 export interface PartyIn { id?: string; kind?: string; name: string; id_type?: string; id_no?: string; phone?: string; email?: string; address?: string }
 export interface HolderData { party: PartyIn; share: string }
 export interface Instrument {
@@ -38,6 +41,7 @@ export interface Instrument {
   status: "lodged" | "registered" | "rejected" | "withdrawn"; data: Record<string, unknown> & { holders?: HolderData[]; party?: PartyIn; details?: string };
   instrument_date: string | null; reference: string; consideration_ngn: string | null; lodged_by: string; lodged_by_name: string; lodged_at: string;
   decided_by_name: string | null; decided_at: string | null; decision_note: string; problems?: string[]; warnings?: string[];
+  approvals?: { by_id: string; by_name: string; at: string; note: string }[]; steps?: number;
 }
 export interface Title {
   id: string; title_no: string; kind: string; kind_name: string; status: string; purpose: string; term_years: number | null;
@@ -61,3 +65,10 @@ export interface PublicResult {
   title: { title_no: string; kind: string; starts_on: string | null; ends_on: string | null } | null;
   encumbrances: { kind: string; count: number }[]; dealings_pending: number; holders: { name: string; share: string }[] | null; checked_at: string;
 }
+
+export type Workflow = Record<"parcel" | InstrumentKind, number>;
+export interface ControlPoint { id: string; epsg: number; name: string; plan_e: string; plan_n: string; true_e: string; true_n: string; notes: string }
+export interface Fit extends Partial<Correction> { method: string; method_name: string; error?: string; residuals?: { name: string; de: number; dn: number; d: number }[] }
+export interface Control { epsg: number; grid_name: string; method: string; points: ControlPoint[]; fits: Record<string, Fit> }
+export interface DxfShape { index: number; layer: string; label: string; area_plan: number; points: { x: number; y: number; beacon: string }[] }
+export interface DxfRead { filename: string; shapes: DxfShape[]; layers: string[]; texts: number }

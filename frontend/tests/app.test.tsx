@@ -24,6 +24,7 @@ const PARCEL = { id: "p7", pin: "KLA-000007", status: "active", area_sqm: "600.1
   notes: "", method: "traverse", source_epsg: 26332, closure_error_m: "0.004", closure_ratio: 25001, survey_plan_no: "FCT/SP/1", surveyor: "", survey_date: null,
   retired_reason: null, created_by_name: "Musa Bello", created_at: "2026-11-05T10:00:00Z", updated_at: "2026-11-05T10:00:00Z", lon: 7.46, lat: 8.98,
   geometry: { type: "Polygon", coordinates: [RING] }, grid_name: "Minna / UTM zone 32N", beacons: CHECK.beacons, neighbours: [],
+  parents: [], children: [], decided_by_name: null, decided_at: null, decision_note: "", correction: null, title_no: null,
   history: [{ at: "2026-11-05T10:00:00Z", actor_name: "Musa Bello", action: "parcel.create", details: {} }] };
 
 const REG = { parcel: { id: "p7", pin: "KLA-000007", status: "active", area_sqm: "600.12", land_use: "", locality: "", address: "" },
@@ -215,5 +216,63 @@ describe("Land Registry", () => {
     expect(screen.getByText("Mortgage")).toBeTruthy();
     expect(screen.getByText("1 lodged, not yet registered")).toBeTruthy();
     expect(calls.some((c) => c.path === "/me")).toBe(false);
+  });
+
+  it("approves a parcel waiting in the workflow", async () => {
+    routes["GET /parcels/p7"] = ok({ ...PARCEL, status: "pending", created_by_name: "Tunde Officer" });
+    routes["POST /parcels/p7/approve"] = () => [200, { ...PARCEL, status: "active", decided_by_name: "Musa Bello" }];
+    open("/parcels/p7");
+    expect(await screen.findByText("Waiting for a registrar")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("Active")).toBeTruthy();
+    expect(calls.some((c) => c.method === "POST" && c.path === "/parcels/p7/approve")).toBe(true);
+  });
+
+  it("asks for the first of two approvals, and not from whoever lodged it", async () => {
+    routes["GET /instruments/i9"] = ok({ ...INS, steps: 2, approvals: [] });
+    open("/instruments/i9");
+    expect(await screen.findByRole("button", { name: "Approve (1 of 2)" })).toBeTruthy();
+    expect(screen.getByText(/0 of 2 so far/)).toBeTruthy();
+    cleanup();
+    routes["GET /instruments/i9"] = ok({ ...INS, steps: 2, lodged_by: "u1", approvals: [] });
+    open("/instruments/i9");
+    expect(((await screen.findByRole("button", { name: "Approve (1 of 2)" })) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("sets the organization's workflow", async () => {
+    routes["GET /settings/workflow"] = ok({ parcel: 0, grant: 1, transfer: 1, mortgage: 1, caveat: 1, lease: 1, discharge: 1, revocation: 1, subdivision: 1, amalgamation: 1 });
+    routes["PUT /settings/workflow"] = (b) => [200, { ...(b as { steps: object }).steps }];
+    routes["GET /grids"] = ok([{ epsg: 26332, name: "Minna / UTM zone 32N" }]);
+    open("/settings");
+    const transfer = await screen.findByLabelText("Transfer") as HTMLSelectElement;
+    fireEvent.change(transfer, { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("A new parcel"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save the workflow" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.path === "/settings/workflow")?.body).toMatchObject({ steps: { transfer: 2, parcel: 1, grant: 1 } }));
+  });
+
+  it("takes a boundary from a DXF drawing", async () => {
+    routes["POST /parcels/import/dxf"] = () => [200, { filename: "layout.dxf", layers: ["PLOTS"], texts: 4, shapes: [
+      { index: 0, layer: "PLOTS", label: "PLOT 1", area_plan: 1200, points: [{ x: 1, y: 2, beacon: "PB 1" }, { x: 3, y: 4, beacon: "" }, { x: 5, y: 6, beacon: "" }] },
+      { index: 1, layer: "PLOTS", label: "PLOT 2", area_plan: 900, points: [{ x: 7, y: 8, beacon: "" }, { x: 9, y: 10, beacon: "" }, { x: 11, y: 12, beacon: "" }] }] }];
+    open("/parcels/new");
+    await screen.findByRole("heading", { name: "New parcel" });
+    const file = new File(["0\nSECTION\n"], "layout.dxf", { type: "application/dxf" });
+    fireEvent.change(screen.getByLabelText("Import from a DXF drawing"), { target: { files: [file] } });
+    fireEvent.click(await screen.findByRole("button", { name: /PLOT 2/ }));
+    expect((screen.getByLabelText("Easting 1") as HTMLInputElement).value).toBe("7");
+    expect((screen.getByLabelText("Address or description") as HTMLInputElement).value).toBe("PLOT 2");
+    expect(calls.find((c) => c.path === "/parcels/import/dxf")!.body).toMatchObject({ filename: "layout.dxf" });
+  });
+
+  it("lodges a subdivision along a cut line on the survey grid", async () => {
+    routes["POST /parcels/p7/instruments"] = (b) => [201, { ...INS, id: "i5", kind: "subdivision", kind_name: "Subdivision", data: b }];
+    routes["GET /instruments/i5"] = ok({ ...INS, id: "i5", kind: "subdivision", kind_name: "Subdivision", data: { pieces: [{ area_sqm: 300 }, { area_sqm: 300 }] } });
+    open("/parcels/p7/lodge?kind=subdivision");
+    expect(await screen.findByRole("heading", { name: "Subdivision" })).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText(/cut line's points/), { target: { value: "331020, 992990\n331020 993060" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lodge it" }));
+    expect(await screen.findByText("300 m² + 300 m²")).toBeTruthy();
+    expect(calls.find((c) => c.method === "POST")!.body).toMatchObject({ kind: "subdivision", cut: [[331020, 992990], [331020, 993060]], cut_epsg: 26332 });
   });
 });
