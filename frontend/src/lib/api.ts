@@ -36,6 +36,7 @@ export interface CaptureBody {
   legs?: { bearing: string; distance_m: number; beacon: string }[];
   points?: { x: number; y: number; beacon: string }[];
   plan_area_sqm?: number;
+  close_to_start?: boolean; close_reason?: string;
 }
 export type ParcelDetails = { land_use?: string; address?: string; locality?: string; notes?: string; survey_plan_no?: string; surveyor?: string; survey_date?: string | null };
 
@@ -83,7 +84,8 @@ export const api = {
   removeSource: (id: string) => req<void>("DELETE", `/enumeration/sources/${id}`),
   enumFeatures: (id: string, status: string, after = 0) => req<{ features: EnumFeature[]; next: number | null }>("GET", `/enumeration/sources/${id}/features?status=${status}&after=${after}`),
   enumCheck: (id: string, feature_ids: string[]) => req<EnumResult[]>("POST", `/enumeration/sources/${id}/check`, { feature_ids }),
-  enumImport: (id: string, feature_ids: string[], lodge_claims: boolean) => req<EnumResult[]>("POST", `/enumeration/sources/${id}/import`, { feature_ids, lodge_claims }),
+  enumImport: (id: string, feature_ids: string[], lodge_claims: boolean, close?: Record<string, string>) =>
+    req<EnumResult[]>("POST", `/enumeration/sources/${id}/import`, { feature_ids, lodge_claims, ...(close ? { close } : {}) }),
   enumClaims: (id: string) => req<{ pin: string; ok: boolean; number?: string; problems?: string[] }[]>("POST", `/enumeration/sources/${id}/claims`),
   audit: (before?: number) => req<AuditEntry[]>("GET", `/audit${before ? `?before=${before}` : ""}`),
 };

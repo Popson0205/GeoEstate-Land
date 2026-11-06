@@ -134,6 +134,9 @@ export default function ParcelPage({ me }: { me: Me }) {
               {x.correction && <><dt>Corrected</dt><dd>to ground control by {x.correction.method_name.split(" (")[0]}: {x.correction.shift_e >= 0 ? "+" : ""}{x.correction.shift_e} m E,
                 {" "}{x.correction.shift_n >= 0 ? "+" : ""}{x.correction.shift_n} m N <span className="ge-muted">(RMS {x.correction.rms_m} m, {x.correction.points} points)</span></dd></>}
               {x.closure_ratio != null && <><dt>Closure</dt><dd>1 in {x.closure_ratio.toLocaleString("en-NG")} ({metres(x.closure_error_m ?? 0)})</dd></>}
+              {x.closed_to_start && <><dt>Closed to start</dt><dd>Leg {x.closed_to_start.leg} taken as {x.closed_to_start.bearing_dms} {x.closed_to_start.distance_m.toFixed(2)} m
+                instead of the plan's {x.closed_to_start.plan_bearing_dms} {x.closed_to_start.plan_distance_m.toFixed(2)} m
+                <div className="ge-muted ge-small" style={{ fontWeight: 400 }}>By {x.closed_to_start.by ?? "a registrar"}: “{x.closed_to_start.reason}”</div></dd></>}
               <dt>Centre</dt><dd className="mono">{x.lat.toFixed(6)}, {x.lon.toFixed(6)}</dd>
               <dt>Registered</dt><dd>{day(x.created_at)} by {x.created_by_name}</dd>
               {x.notes && <><dt>Notes</dt><dd style={{ fontWeight: 400, whiteSpace: "pre-wrap" }}>{x.notes}</dd></>}

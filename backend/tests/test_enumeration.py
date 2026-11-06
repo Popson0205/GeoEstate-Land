@@ -171,3 +171,9 @@ def test_plots_plotted_from_their_survey_plan_are_recomputed_here(client, person
     assert p["method"] == "traverse" and p["source_epsg"] == 26332 and p["closure_ratio"] > 10000
     assert abs(p["lon"] - 7.4898) < 0.002 and abs(p["lat"] - 9.0001) < 0.002          # where the plan puts it, not where the phone drew it
     assert p["beacons"][0]["easting"] == 334000.0
+    # a registrar can close the bad one to its start, saying why: kept with the parcel
+    why = "Field team confirmed beacon PL04; plan misprinted."
+    res = {r["id"]: r for r in reg.post(f"/enumeration/sources/{s['id']}/import", json={"feature_ids": [bad], "close": {bad: why}}).json()}
+    assert res[bad]["ok"], res[bad]
+    q = reg.get(f"/parcels/{res[bad]['parcel_id']}").json()
+    assert q["closed_to_start"]["reason"] == why and q["closed_to_start"]["leg"] == 4 and q["closed_to_start"]["distance_m"] == 20.0
