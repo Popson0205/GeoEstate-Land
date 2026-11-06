@@ -83,11 +83,11 @@ dialog.modal::backdrop { background: rgba(26,34,51,.35); }
 .capture th:first-child { width: 36px; } .capture th:last-child { width: 44px; }
 .capture td { padding: 6px 8px; } .capture th { padding: 10px 8px; }
 .capture td input { width: 100%; min-width: 0; }
-.start-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.start-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 460px; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .start-grid legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
 .paste textarea { display: block; width: 100%; }
 @media (max-width: 900px) { .two { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 520px) { .start-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .start-grid > :first-of-type { grid-column: 1 / -1; } }
+
 .stack > * { min-width: 0; max-width: 100%; } .table-wrap { position: relative; }
 
 /* titles and land records */
@@ -140,3 +140,10 @@ input.sr-only:focus-visible + *, label.ge-btn:focus-within { outline: 2px solid 
 .basemap-switch { position: absolute; top: 10px; left: 10px; z-index: 2; display: inline-flex; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.18); overflow: hidden; }
 .basemap-switch button { border: 0; background: transparent; padding: 6px 12px; font: 600 13px var(--ge-font); color: var(--ge-muted); cursor: pointer; min-height: 32px; }
 .basemap-switch button[aria-pressed="true"] { background: var(--ge-navy); color: #fff; }
+
+/* degrees, minutes and seconds: narrow boxes; the beacon and distance take the room */
+.capture.is-legs { min-width: 470px; }
+.capture.is-legs th:nth-child(3), .capture.is-legs th:nth-child(4), .capture.is-legs th:nth-child(5) { width: 64px; }
+.capture.is-legs th:nth-child(6) { width: 104px; }
+.capture.is-legs td input { text-align: right; }
+.capture.is-legs td:nth-child(2) input { text-align: left; }

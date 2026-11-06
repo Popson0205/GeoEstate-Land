@@ -3,14 +3,16 @@ import { Link, useNavigate } from "react-router-dom";
 import MapView from "../components/MapView";
 import { Button, ErrorText, useToast } from "../components/ui";
 import { ApiError, api, type CaptureBody } from "../lib/api";
-import { LAND_USES, area, metres, parseRows } from "../lib/format";
+import { LAND_USES, area, joinBearing, metres, parseRows, splitBearing } from "../lib/format";
 import type { Check, DxfRead, Me } from "../lib/types";
 import { MAX_DXF, readText } from "../lib/readFile";
 import { useLoad } from "../lib/useLoad";
 
 type Method = "traverse" | "coordinates";
-type Row = [string, string, string];          // beacon, bearing | easting, distance | northing
-const blank = (n: number): Row[] => Array.from({ length: n }, () => ["", "", ""] as Row);
+// A traverse leg: to beacon, degrees, minutes, seconds, distance. A beacon: name, easting, northing.
+type Row = string[];
+const LEG = 5, POINT = 3;
+const blank = (n: number, cols: number): Row[] => Array.from({ length: n }, () => Array(cols).fill(""));
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s.replace(/,/g, "")));
 
 export function CheckResult({ c }: { c: Check }) {
@@ -47,9 +49,9 @@ export default function NewParcelPage({ me }: { me: Me }) {
   const fabric = useLoad(() => api.fabric());
   const [method, setMethod] = useState<Method>("traverse");
   const [epsg, setEpsg] = useState<number | null>(null);
-  const [start, setStart] = useState<Row>(["", "", ""]);
-  const [legs, setLegs] = useState<Row[]>(blank(4));
-  const [points, setPoints] = useState<Row[]>(blank(4));
+  const [start, setStart] = useState<[string, string]>(["", ""]);          // the starting point's easting and northing
+  const [legs, setLegs] = useState<Row[]>(blank(4, LEG));
+  const [points, setPoints] = useState<Row[]>(blank(4, POINT));
   const [paste, setPaste] = useState("");
   const [d, setD] = useState({ land_use: "", address: "", locality: "", survey_plan_no: "", surveyor: "", survey_date: "", notes: "" });
   const [check, setCheck] = useState<{ c: Check; for: string } | null>(null);
@@ -68,7 +70,7 @@ export default function NewParcelPage({ me }: { me: Me }) {
   };
   const takeShape = (pts: { x: number; y: number; beacon: string }[], label: string) => {
     setMethod("coordinates");
-    setPoints([...pts.map((p) => [p.beacon, String(p.x), String(p.y)] as Row), ["", "", ""]]);
+    setPoints([...pts.map((p) => [p.beacon, String(p.x), String(p.y)]), ["", "", ""]]);
     if (label) setD((x) => ({ ...x, address: x.address || label }));
     setCheck(null);
   };
@@ -79,14 +81,15 @@ export default function NewParcelPage({ me }: { me: Me }) {
   const body = useMemo((): CaptureBody | string => {
     const filled = rows.filter((r) => r.some((x) => x.trim()));
     if (method === "traverse") {
-      const [b, e, n] = start;
-      if (!Number.isFinite(num(e)) || !Number.isFinite(num(n))) return "Give the starting beacon's easting and northing.";
+      const [e, n] = start;
+      if (!Number.isFinite(num(e)) || !Number.isFinite(num(n))) return "Give the starting point's easting and northing.";
       if (filled.length < 3) return "A traverse needs at least 3 legs.";
       for (const [i, r] of filled.entries()) {
-        if (!r[1].trim() || !(num(r[2]) > 0)) return `Leg ${i + 1} needs a bearing and a distance.`;
+        if (!joinBearing(r[1], r[2], r[3])) return `Leg ${i + 1}: degrees 0 to 359, minutes and seconds 0 to 59.`;
+        if (!(num(r[4]) > 0)) return `Leg ${i + 1} needs a distance.`;
       }
-      return { method, epsg: epsg ?? undefined, start: { beacon: b.trim(), easting: num(e), northing: num(n) },
-        legs: filled.map((r) => ({ beacon: r[0].trim(), bearing: r[1].trim(), distance_m: num(r[2]) })) };
+      return { method, epsg: epsg ?? undefined, start: { beacon: "", easting: num(e), northing: num(n) },
+        legs: filled.map((r) => ({ beacon: r[0].trim(), bearing: joinBearing(r[1], r[2], r[3])!, distance_m: num(r[4]) })) };
     }
     if (filled.length < 3) return "A parcel needs at least 3 beacons.";
     for (const [i, r] of filled.entries()) {
@@ -119,21 +122,21 @@ export default function NewParcelPage({ me }: { me: Me }) {
   const usePaste = () => {
     const { rows: got, bad } = parseRows(paste, method);
     if (!got.length) { setErr("Nothing to use: put one row per line."); return; }
-    setRows([...got.map((r) => r as Row), ...blank(1)]);
+    setRows([...got.map((r) => (method === "traverse" ? [r[0], ...splitBearing(r[1]), r[2]] : r)), ...blank(1, method === "traverse" ? LEG : POINT)]);
     setPaste("");
     setErr(bad.length ? `Lines ${bad.join(", ")} were left out: they did not have the values needed.` : null);
   };
   const edit = (i: number, j: number, v: string) => setRows((rs) => {
-    const next = rs.map((r) => [...r] as Row);
+    const next = rs.map((r) => [...r]);
     next[i][j] = v;
-    if (i === next.length - 1 && v.trim()) next.push(["", "", ""]);
+    if (i === next.length - 1 && v.trim()) next.push(Array(next[i].length).fill(""));
     return next;
   });
   const remove = (i: number) => setRows((rs) => (rs.length > 1 ? rs.filter((_, k) => k !== i) : rs));
 
   if (me.role === "viewer") return <section className="ge-card"><h1>New parcel</h1><p>Only registrars and officers can register parcels.</p></section>;
   const projected = epsg !== 4326;
-  const heads = method === "traverse" ? ["To beacon", "Bearing", "Distance (m)"] : ["Beacon", projected ? "Easting" : "Longitude", projected ? "Northing" : "Latitude"];
+  const heads = method === "traverse" ? ["To beacon", "Degrees", "Minutes", "Seconds", "Distance (m)"] : ["Beacon", projected ? "Easting" : "Longitude", projected ? "Northing" : "Latitude"];
 
   return (
     <>
@@ -158,26 +161,26 @@ export default function NewParcelPage({ me }: { me: Me }) {
             </div>
             {method === "traverse" && (
               <fieldset className="start-grid">
-                <legend>Starting beacon</legend>
-                <div className="ge-field"><label htmlFor="sb">Beacon</label><input id="sb" placeholder="e.g. SC/FCT 1234" value={start[0]} onChange={(e) => setStart([e.target.value, start[1], start[2]])} /></div>
-                <div className="ge-field"><label htmlFor="se">Easting (m)</label><input id="se" inputMode="decimal" value={start[1]} onChange={(e) => setStart([start[0], e.target.value, start[2]])} /></div>
-                <div className="ge-field"><label htmlFor="sn">Northing (m)</label><input id="sn" inputMode="decimal" value={start[2]} onChange={(e) => setStart([start[0], start[1], e.target.value])} /></div>
+                <legend>Starting point</legend>
+                <div className="ge-field"><label htmlFor="se">Easting (m)</label><input id="se" inputMode="decimal" value={start[0]} onChange={(e) => setStart([e.target.value, start[1]])} /></div>
+                <div className="ge-field"><label htmlFor="sn">Northing (m)</label><input id="sn" inputMode="decimal" value={start[1]} onChange={(e) => setStart([start[0], e.target.value])} /></div>
               </fieldset>
             )}
             <div>
               <p className="ge-small ge-muted" style={{ margin: "0 0 6px" }}>
                 {method === "traverse"
-                  ? "One leg per row, in order around the parcel; the last leg comes back to the starting beacon. Bearings are whole-circle from grid north: 123.5, 123°30' or 123 30 15."
+                  ? "One leg per row, in order around the parcel; the last leg comes back to the starting point. Bearings are whole-circle from grid north, in degrees, minutes and seconds."
                   : "One beacon per row, in order around the parcel. The first beacon is not repeated at the end."}
               </p>
               <div className="table-wrap">
-                <table className="ge-table capture" aria-label={method === "traverse" ? "Traverse legs" : "Beacon coordinates"}>
+                <table className={`ge-table capture${method === "traverse" ? " is-legs" : ""}`} aria-label={method === "traverse" ? "Traverse legs" : "Beacon coordinates"}>
                   <thead><tr><th>#</th>{heads.map((h) => <th key={h}>{h}</th>)}<th><span className="sr-only">Remove</span></th></tr></thead>
                   <tbody>
                     {rows.map((r, i) => (
                       <tr key={i}>
                         <td className="ge-muted">{i + 1}</td>
-                        {r.map((v, j) => <td key={j}><input aria-label={`${heads[j]} ${i + 1}`} value={v} inputMode={j ? "decimal" : undefined}
+                        {r.map((v, j) => <td key={j}><input aria-label={`${heads[j]} ${i + 1}`} value={v} inputMode={j ? (method === "traverse" && j < 4 ? "numeric" : "decimal") : undefined}
+                          maxLength={method === "traverse" && j > 0 && j < 4 ? (j === 1 ? 3 : 5) : undefined} placeholder={method === "traverse" ? ["", "°", "′", "″", "m"][j] : undefined}
                           className={j ? "mono" : undefined} onChange={(e) => edit(i, j, e.target.value)} /></td>)}
                         <td><button type="button" className="ge-btn ge-btn-ghost ge-btn-sm" aria-label={`Remove row ${i + 1}`} onClick={() => remove(i)}>×</button></td>
                       </tr>
