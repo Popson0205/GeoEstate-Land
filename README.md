@@ -89,6 +89,7 @@ It shares Geohub's PostgreSQL (with PostGIS) and keeps its tables in the `land` 
 | `APP_URL` | where people open Land Registry, e.g. `https://land.geoestate.ng` |
 | `GEOHUB_URL`, `GEOHUB_API` | Geohub's address and its API (`…/api`) |
 | `ID_CLIENT`, `ID_SECRET` | this app's GeoEstate ID client (`land`) and its secret |
+| `PLATFORM_KEY` | optional: a long random key shared with LandCheck, which asks `/platform/title-status` what the published registries (public lookup on) hold at a place. The same value goes in LandCheck's `LAND_PLATFORM_KEY` |
 
 In **Geohub's** variables:
 

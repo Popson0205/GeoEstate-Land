@@ -171,3 +171,44 @@ def test_public_lookup(client, person):
     client.cookies.clear()
     codes = [client.get(f"/public/{slug}/lookup", params={"q": p["pin"]}).status_code for _ in range(32)]
     assert codes[:30] == [200] * 30 and codes[30] == 429
+
+
+def test_title_status_for_other_products(client, person):
+    """LandCheck asks, with the platform key, what the published registries hold at a point."""
+    from app.config import settings
+    reg, off = staff(person)
+    p = parcel(off, 336000)
+    reg.post(f"/parcels/{p['id']}/instruments", json={"kind": "grant", "title_kind": "statutory_ro", "title_no": "KB/CO/0777", "register_now": True,
+                                                      "holders": [{"party": {"name": "Ngozi Eze", "id_no": "55", "id_type": "NIN"}}]})
+    reg.post(f"/parcels/{p['id']}/instruments", json={"kind": "mortgage", "party": {"name": "Zenith Bank"}, "amount_ngn": 2e6, "register_now": True})
+    x = reg.get(f"/parcels/{p['id']}").json()
+    s = reg.get("/settings").json()
+    body = {k: s[k] for k in ("default_epsg", "pin_prefix", "closure_ratio", "overlap_tolerance_sqm")}
+    q = {"lat": x["lat"], "lng": x["lon"]}
+    client.cookies.clear()
+    old, settings.platform_key = settings.platform_key, ""
+    try:
+        assert client.get("/platform/title-status", params=q).status_code == 503              # not set up
+        settings.platform_key = "k" * 40
+        assert client.get("/platform/title-status", params=q).status_code == 401
+        assert client.get("/platform/title-status", params=q, headers={"X-Platform-Key": "wrong"}).status_code == 401
+        key = {"X-Platform-Key": "k" * 40}
+        reg.put("/settings", json={**body, "public_lookup": "off"})
+        client.cookies.clear()
+        r = client.get("/platform/title-status", params=q, headers=key).json()
+        assert not any(a["pin"] == p["pin"] for a in r["at"])                                  # a registry that does not publish is not searched
+        reg.put("/settings", json={**body, "public_lookup": "basic"})
+        client.cookies.clear()
+        r = client.get("/platform/title-status", params=q, headers=key).json()
+        a = next(a for a in r["at"] if a["pin"] == p["pin"])
+        assert a["title"]["title_no"] == "KB/CO/0777" and a["encumbrances"] == [{"kind": "mortgage", "count": 1}] and a["holders"] is None
+        assert a["lookup_url"].endswith(f"/lookup/{s['org_slug']}?q={p['pin']}") and r["registries_searched"] >= 1 and "55" not in str(r) and "amount" not in str(r)
+        # just off the parcel: it is near, not at
+        r = client.get("/platform/title-status", params={"lat": x["lat"], "lng": x["lon"] + 0.0003}, headers=key).json()
+        assert not any(a["pin"] == p["pin"] for a in r["at"]) and any(n["pin"] == p["pin"] and 0 < n["distance_m"] <= 50 for n in r["near"])
+        reg.put("/settings", json={**body, "public_lookup": "holders"})
+        client.cookies.clear()
+        r = client.get("/platform/title-status", params=q, headers=key).json()
+        assert next(a for a in r["at"] if a["pin"] == p["pin"])["holders"] == [{"name": "Ngozi Eze", "share": "1/1"}]
+    finally:
+        settings.platform_key = old

@@ -56,9 +56,15 @@ async def lookup(slug: str, request: Request, q: str = Query(min_length=3, max_l
     p = await cur.fetchone()
     if not p:
         raise Problem(404, f"No parcel with PIN or title number {q} in {s['org_name']}'s register.", code="not_found")
+    return await parcel_status(conn, p, s["org_name"], s["public_lookup"] == "holders")
+
+
+async def parcel_status(conn, p: dict, registry: str, holders: bool) -> dict:
+    """What the public may know about a parcel: its title, whether it is encumbered or has dealings waiting, and (when the
+    registry shows them) its holders. p has id, pin, status, area_sqm, land_use, locality, lon, lat."""
     cur = await conn.execute("SELECT id, title_no, kind, starts_on, ends_on FROM titles WHERE parcel_id = %s AND status = 'current'", (p["id"],))
     t = await cur.fetchone()
-    out = {"registry": s["org_name"], "pin": p["pin"], "status": p["status"], "area_sqm": float(p["area_sqm"]), "land_use": p["land_use"],
+    out = {"registry": registry, "pin": p["pin"], "status": p["status"], "area_sqm": float(p["area_sqm"]), "land_use": p["land_use"],
            "locality": p["locality"], "lon": round(p["lon"], 5), "lat": round(p["lat"], 5), "title": None, "encumbrances": [],
            "dealings_pending": 0, "holders": None, "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if t:
@@ -67,7 +73,7 @@ async def lookup(slug: str, request: Request, q: str = Query(min_length=3, max_l
         cur = await conn.execute("SELECT kind, count(*) AS n FROM encumbrances WHERE title_id = %s AND to_instrument IS NULL GROUP BY kind "
                                  "ORDER BY kind", (t["id"],))
         out["encumbrances"] = [{"kind": r["kind"], "count": r["n"]} for r in await cur.fetchall()]
-        if s["public_lookup"] == "holders":
+        if holders:
             cur = await conn.execute("SELECT pa.name, h.share FROM holdings h JOIN parties pa ON pa.id = h.party_id "
                                      "WHERE h.title_id = %s AND h.to_instrument IS NULL ORDER BY h.id", (t["id"],))
             out["holders"] = await cur.fetchall()
