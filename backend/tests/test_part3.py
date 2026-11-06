@@ -4,7 +4,7 @@ import uuid
 import ezdxf
 
 ORG3 = str(uuid.uuid4())
-ALL = ["parcels", "titles", "transactions", "public_lookup"]
+ALL = ["parcels", "titles", "transactions", "public_lookup", "workflows", "dxf_import"]
 
 
 def team(person):

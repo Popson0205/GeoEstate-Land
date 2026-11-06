@@ -50,7 +50,21 @@ Licence features (from the organization's Land Registry plan in Geohub): `parcel
   with their lineage; titled land carries its proprietors, terms (ground rent apportioned by area) and encumbrances to
   the new titles.
 
-Coming next: enumeration forms in Geohub that feed the register.
+**Enumeration from Geohub (part 4)**
+
+- A registrar connects a Geohub form that maps areas and says which question holds the plot number, address, locality,
+  land use, notes, and the occupant's name, phone and NIN (guessed from the questions to start with), with defaults.
+- Officers see the form's plots as Geohub has them (approved by a supervisor in Geohub's review), check them like any
+  survey, and register them: each becomes a parcel through the organization's workflow, linked to its Geohub feature so
+  it is never brought in twice (and flagged if it changes in Geohub afterwards).
+- Each occupant, as enumerated, is kept as a claim and can be lodged as a grant (a customary right of occupancy unless the
+  source says otherwise) for a registrar to decide: systematic first registration. Claims for parcels that waited for
+  approval are lodged later with "Lodge claims waiting".
+- Geohub is read as the signed-in person through GeoEstate ID (`/id/data` in Geohub), so only forms they could open in
+  Geohub are offered.
+
+Plans: survey plan (DXF) import and choosing the workflow are part of Land Registry Advanced (`dxf_import`, `workflows`);
+on Standard the workflow is fixed (one registrar per instrument, no approval for new parcels).
 
 ## Who can do what
 

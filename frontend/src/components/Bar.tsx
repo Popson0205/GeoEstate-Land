@@ -61,7 +61,7 @@ export default function Bar({ me, onSignOut }: { me: Me; onSignOut: () => void }
   const [open, setOpen] = useState(false);
   useEffect(() => { void api.apps().then(setApps, () => setApps([])); }, []);
   const notice = licenceNotice(me.product);
-  const links: [string, string, boolean][] = [["/", "Register", true], ["/map", "Map", true], ["/instruments", "Instruments", true], ["/parcels/new", "New parcel", me.role !== "viewer"],
+  const links: [string, string, boolean][] = [["/", "Register", true], ["/map", "Map", true], ["/instruments", "Instruments", true], ["/enumeration", "Enumeration", true], ["/parcels/new", "New parcel", me.role !== "viewer"],
     ["/settings", "Settings", me.role === "registrar"], ["/activity", "Activity", me.role === "registrar"]];
   return (
     <>

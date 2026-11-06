@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import errors
 from .config import settings
 from .db import migrate, pool
-from .routers import auth, parcels, public, register
+from .routers import auth, enumeration, parcels, public, register
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -26,7 +26,7 @@ app = FastAPI(title="GeoEstate Land Registry API", version="1.0.0", lifespan=lif
               docs_url=f"{settings.api_prefix}/docs", openapi_url=f"{settings.api_prefix}/openapi.json")
 errors.install(app)
 P = settings.api_prefix
-for r in (auth.router, parcels.router, register.router, public.router):
+for r in (auth.router, parcels.router, register.router, public.router, enumeration.router):
     app.include_router(r, prefix=P)
 
 

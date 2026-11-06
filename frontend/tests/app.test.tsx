@@ -275,4 +275,46 @@ describe("Land Registry", () => {
     expect(await screen.findByText("300 m² + 300 m²")).toBeTruthy();
     expect(calls.find((c) => c.method === "POST")!.body).toMatchObject({ kind: "subdivision", cut: [[331020, 992990], [331020, 993060]], cut_epsg: 26332 });
   });
+
+  it("connects a Geohub form, guessing which question holds what", async () => {
+    routes["GET /enumeration/sources"] = ok([]);
+    routes["GET /enumeration/geohub"] = ok([{ id: "pr1", name: "Bwari enumeration", description: "", role: "admin", forms: [{ id: "fo1", name: "Plots",
+      geometry_type: "area", version: 1, features: 4, approved: 3, fields: [{ id: "q1", label: "Plot No.", type: "text" }, { id: "q2", label: "Occupant name", type: "text" },
+        { id: "q3", label: "Phone number", type: "text" }, { id: "q4", label: "Land use", type: "choice" }] }] }]);
+    routes["POST /enumeration/sources"] = (b) => [201, { id: "s1", ...(b as object) }];
+    routes["GET /enumeration/sources/s1"] = ok({ id: "s1", project_id: "pr1", project_name: "Bwari enumeration", form_id: "fo1", form_name: "Plots", field_map: {}, defaults: {},
+      created_by_name: "Musa Bello", created_at: "", imported: 0, claims_lodged: 0, form: null });
+    routes["GET /enumeration/sources/s1/features?status=approved&after=0"] = ok({ features: [], next: null });
+    open("/enumeration");
+    fireEvent.click(await screen.findByRole("button", { name: "Connect a Geohub form" }));
+    fireEvent.change(await screen.findByLabelText("Geohub form"), { target: { value: "pr1/fo1" } });
+    expect((screen.getByLabelText("Plot number") as HTMLSelectElement).value).toBe("q1");
+    expect((screen.getByLabelText("Occupant's (claimant's) name") as HTMLSelectElement).value).toBe("q2");
+    expect((screen.getByLabelText("Occupant's phone") as HTMLSelectElement).value).toBe("q3");
+    fireEvent.change(document.getElementById("dloc")!, { target: { value: "Bwari" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect the form" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/enumeration/sources")?.body).toMatchObject({
+      project_id: "pr1", form_id: "fo1", field_map: { plot_no: "q1", claimant_name: "q2", claimant_phone: "q3", land_use: "q4" }, defaults: { locality: "Bwari", title_kind: "customary_ro" } }));
+    expect(await screen.findByText("No approved plots yet. A supervisor approves them in Geohub's review.")).toBeTruthy();
+  });
+
+  it("registers enumerated plots and lodges their claims", async () => {
+    const SRC = { id: "s1", project_id: "pr1", project_name: "Bwari enumeration", form_id: "fo1", form_name: "Plots", field_map: {}, defaults: { title_kind: "customary_ro" },
+      created_by_name: "Musa Bello", created_at: "", imported: 1, claims_lodged: 0, form: null };
+    const M = { plot_no: "12", address: "", locality: "Bwari", land_use: "residential", notes: "", claimant_name: "Aisha Bako", claimant_phone: "0803", claimant_id_no: "", full_address: "Plot 12" };
+    const F = (id: string, extra = {}) => ({ id, seq: 1, status: "approved", version: 1, geometry: { type: "Polygon", coordinates: [RING] }, created_by_name: "Garba", created_at: "2026-10-30T09:00:00Z",
+      reviewed_by_name: null, mapped: M, properties: {}, changed_since: false, imported: null, ...extra });
+    routes["GET /enumeration/sources/s1"] = ok(SRC);
+    routes["GET /enumeration/sources/s1/features?status=approved&after=0"] = ok({ next: null, features: [F("f1"),
+      F("f2", { mapped: { ...M, full_address: "Plot 13", claimant_name: "Yakubu" }, imported: { parcel_id: "p9", pin: "KLA-000009", status: "active", claim_number: null, claim_status: null, has_claim: true } })] });
+    routes["POST /enumeration/sources/s1/import"] = () => [200, [{ id: "f1", ok: true, pin: "KLA-000010", parcel_id: "p10", status: "active", claim: { ok: true, number: "INS/2026/000011", status: "lodged" } }]];
+    open("/enumeration/s1");
+    expect(await screen.findByText("Plot 12")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "KLA-000009" })).toBeTruthy();
+    expect(screen.getByText("Claim not lodged yet")).toBeTruthy();
+    expect(screen.queryByLabelText("Plot Plot 13")).toBeNull();                       // already in the register: not offered again
+    fireEvent.click(screen.getByLabelText("All plots not yet registered"));
+    fireEvent.click(screen.getByRole("button", { name: "Register 1 plot" }));
+    await waitFor(() => expect(calls.find((c) => c.path === "/enumeration/sources/s1/import")?.body).toEqual({ feature_ids: ["f1"], lodge_claims: true }));
+  });
 });

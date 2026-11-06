@@ -1,4 +1,4 @@
-import type { App, Control, DxfRead, Workflow, AuditEntry, Check, Grid, HolderData, Home, Instrument, InstrumentKind, Kinds, Me, OrgSettings, Parcel, ParcelRow, PartyDetail, PartyIn, PartyRow, PublicResult, Register } from "./types";
+import type { App, Control, DxfRead, EnumFeature, EnumResult, EnumSource, GeohubProject, Workflow, AuditEntry, Check, Grid, HolderData, Home, Instrument, InstrumentKind, Kinds, Me, OrgSettings, Parcel, ParcelRow, PartyDetail, PartyIn, PartyRow, PublicResult, Register } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string, public body?: Record<string, unknown>) { super(message); }
@@ -74,6 +74,16 @@ export const api = {
   removeControl: (id: string) => req<Control>("DELETE", `/control/${id}`),
   setCorrection: (epsg: number, method: string) => req<Control>("PUT", "/settings/corrections", { epsg, method }),
   importDxf: (filename: string, content: string) => req<DxfRead>("POST", "/parcels/import/dxf", { filename, content }),
+  geohubForms: () => req<GeohubProject[]>("GET", "/enumeration/geohub"),
+  sources: () => req<EnumSource[]>("GET", "/enumeration/sources"),
+  source: (id: string) => req<EnumSource>("GET", `/enumeration/sources/${id}`),
+  addSource: (b: { project_id: string; form_id: string; field_map: Record<string, string>; defaults: Record<string, string> }) => req<EnumSource>("POST", "/enumeration/sources", b),
+  patchSource: (id: string, b: { field_map?: Record<string, string>; defaults?: Record<string, string> }) => req<EnumSource>("PATCH", `/enumeration/sources/${id}`, b),
+  removeSource: (id: string) => req<void>("DELETE", `/enumeration/sources/${id}`),
+  enumFeatures: (id: string, status: string, after = 0) => req<{ features: EnumFeature[]; next: number | null }>("GET", `/enumeration/sources/${id}/features?status=${status}&after=${after}`),
+  enumCheck: (id: string, feature_ids: string[]) => req<EnumResult[]>("POST", `/enumeration/sources/${id}/check`, { feature_ids }),
+  enumImport: (id: string, feature_ids: string[], lodge_claims: boolean) => req<EnumResult[]>("POST", `/enumeration/sources/${id}/import`, { feature_ids, lodge_claims }),
+  enumClaims: (id: string) => req<{ pin: string; ok: boolean; number?: string; problems?: string[] }[]>("POST", `/enumeration/sources/${id}/claims`),
   audit: (before?: number) => req<AuditEntry[]>("GET", `/audit${before ? `?before=${before}` : ""}`),
 };
 

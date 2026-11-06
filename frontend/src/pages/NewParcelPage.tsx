@@ -186,11 +186,11 @@ export default function NewParcelPage({ me }: { me: Me }) {
                 </table>
               </div>
             </div>
-            <div className="actions">
+            {settings.data?.dxf_allowed !== false && <div className="actions">
               <label className="ge-btn ge-btn-sm" htmlFor="dxf">{busy === "dxf" ? "Reading the drawing…" : "Import from a DXF drawing"}</label>
               <input id="dxf" type="file" accept=".dxf" className="sr-only" onChange={(e) => { void openDxf(e.target.files?.[0]); e.target.value = ""; }} />
               <Link className="ge-small" to="/parcels/import">Register a whole layout from one drawing</Link>
-            </div>
+            </div>}
             {dxf && dxf.shapes.length > 1 && (
               <div className="ge-small">
                 <strong>{dxf.filename}</strong> has {dxf.shapes.length} closed boundaries. Choose one:

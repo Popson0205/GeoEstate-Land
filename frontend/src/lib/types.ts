@@ -9,7 +9,7 @@ export interface App { product: string; name: string; status: string; url: strin
 export interface Grid { epsg: number; name: string }
 export interface OrgSettings { org_id: string; org_name: string; default_epsg: number; grid_name: string; pin_prefix: string; pin_next: number;
   closure_ratio: number; overlap_tolerance_sqm: number; org_slug: string; title_prefix: string; title_next: number;
-  public_lookup: "off" | "basic" | "holders"; public_allowed: boolean }
+  public_lookup: "off" | "basic" | "holders"; public_allowed: boolean; workflows_allowed: boolean; dxf_allowed: boolean }
 export interface Beacon { seq: number; name: string; easting: number | null; northing: number | null; lon: number; lat: number }
 export interface Check {
   ok: boolean; problems: string[]; warnings: string[]; method: "traverse" | "coordinates"; epsg: number; grid_name: string;
@@ -72,3 +72,17 @@ export interface Fit extends Partial<Correction> { method: string; method_name: 
 export interface Control { epsg: number; grid_name: string; method: string; points: ControlPoint[]; fits: Record<string, Fit> }
 export interface DxfShape { index: number; layer: string; label: string; area_plan: number; points: { x: number; y: number; beacon: string }[] }
 export interface DxfRead { filename: string; shapes: DxfShape[]; layers: string[]; texts: number }
+
+export interface GeohubField { id: string; label: string; type: string; choices?: string[] }
+export interface GeohubForm { id: string; name: string; geometry_type: string; version: number; features: number; approved: number; fields: GeohubField[] }
+export interface GeohubProject { id: string; name: string; description: string; role: string; forms: GeohubForm[] }
+export interface EnumSource { id: string; project_id: string; project_name: string; form_id: string; form_name: string;
+  field_map: Record<string, string>; defaults: Record<string, string>; created_by_name: string; created_at: string; imported: number; claims_lodged: number;
+  form?: GeohubForm | null }
+export interface Mapped { plot_no: string; address: string; locality: string; land_use: string; notes: string; claimant_name: string;
+  claimant_phone: string; claimant_id_no: string; full_address: string }
+export interface EnumFeature { id: string; seq: number; status: string; version: number; geometry: GeoJSON.Geometry; created_by_name: string | null;
+  created_at: string; reviewed_by_name: string | null; mapped: Mapped; properties: Record<string, unknown>; changed_since: boolean;
+  imported: { parcel_id: string; pin: string; status: string; claim_number: string | null; claim_status: string | null; has_claim: boolean } | null }
+export interface EnumResult { id: string; ok: boolean; problems?: string[]; warnings?: string[]; area_sqm?: number; pin?: string; parcel_id?: string;
+  status?: string; claim?: { ok: boolean; number?: string; status?: string; problems?: string[] } }
