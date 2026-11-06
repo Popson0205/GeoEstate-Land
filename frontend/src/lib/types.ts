@@ -14,7 +14,7 @@ export interface Beacon { seq: number; name: string; easting: number | null; nor
 export interface Check {
   ok: boolean; problems: string[]; warnings: string[]; method: "traverse" | "coordinates"; epsg: number; grid_name: string;
   closure: { misclosure_m: number; misclosure_e: number; misclosure_n: number; perimeter_m: number; ratio: number | null; required_ratio: number; adjusted: boolean;
-    fixes?: LegFix[]; suspect?: LegFix | null } | null;
+    fixes?: LegFix[]; suspect?: LegFix | null; closed?: ClosedToStart } | null;
   legs: { bearing: number; bearing_dms: string; distance_m: number }[]; area_sqm: number; area_ha: number; perimeter_m: number;
   geometry: GeoJSON.Polygon; beacons: Beacon[]; overlaps: { id: string; pin: string; overlap_sqm: number }[]; correction: Correction | null;
 }
@@ -22,7 +22,7 @@ export interface Correction { method: string; method_name: string; shift_e: numb
 export interface ParcelRow {
   id: string; pin: string; status: "pending" | "active" | "retired" | "rejected"; decided_by_name: string | null; decided_at: string | null;
   decision_note: string; correction: Correction | null; area_sqm: string; perimeter_m: string; land_use: string; address: string; locality: string;
-  notes: string; method: string; source_epsg: number; closure_error_m: string | null; closure_ratio: number | null; survey_plan_no: string;
+  notes: string; method: string; source_epsg: number; closure_error_m: string | null; closure_ratio: number | null; closed_to_start?: ClosedToStart | null; survey_plan_no: string;
   surveyor: string; survey_date: string | null; retired_reason: string | null; created_by_name: string; created_at: string; updated_at: string;
   lon: number; lat: number; title_no: string | null;
 }
@@ -89,8 +89,11 @@ export interface EnumFeature { id: string; seq: number; status: string; version:
   located_by?: "plan" | "gps" | "map";
   imported: { parcel_id: string; pin: string; status: string; claim_number: string | null; claim_status: string | null; has_claim: boolean } | null }
 export interface EnumResult { id: string; ok: boolean; problems?: string[]; warnings?: string[]; area_sqm?: number; pin?: string; parcel_id?: string;
-  closure?: { ratio: number | null } | null;
+  closure?: { ratio: number | null; required_ratio?: number; closed?: ClosedToStart } | null;
   status?: string; claim?: { ok: boolean; number?: string; status?: string; problems?: string[] } }
 
 /** The bearing and distance that would close a traverse if only this leg were wrong, and the area that would give. */
 export interface LegFix { leg: number; bearing: number; bearing_dms: string; distance_m: number; area_sqm: number; bearing_change_deg: number; distance_change_m: number }
+/** A traverse a registrar closed to its starting point: the plan's last leg and the one used instead, who and why. */
+export interface ClosedToStart { leg: number; bearing_dms: string; distance_m: number; plan_bearing_dms: string; plan_distance_m: number;
+  plan_misclosure_m: number; plan_ratio: number; reason: string; by?: string }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import CloseToStart from "../components/CloseToStart";
 import MapView from "../components/MapView";
 import { Button, ErrorText, useAction } from "../components/ui";
 import { api } from "../lib/api";
@@ -56,6 +57,15 @@ export default function EnumSourcePage({ me }: { me: Me }) {
         setResult((r) => ({ ...r, ...Object.fromEntries(got.map((x) => [x.id, x])) }));
       }
       setPick(new Set()); await load(); void fabric.reload(); void src.reload();
+    } catch (e) { setErr(e); } finally { setBusy(null); }
+  };
+  /** A registrar closes one plot's traverse to its start, with why, and registers it. */
+  const closeOne = async (fid: string, reason: string) => {
+    setBusy("close:" + fid);
+    try {
+      const got = await api.enumImport(id, [fid], claims, { [fid]: reason });
+      setResult((r) => ({ ...r, ...Object.fromEntries(got.map((x) => [x.id, x])) }));
+      if (got.some((x) => x.ok)) { setPick((p) => { const n = new Set(p); n.delete(fid); return n; }); await load(); void fabric.reload(); void src.reload(); }
     } catch (e) { setErr(e); } finally { setBusy(null); }
   };
   const doClaims = async () => {
@@ -119,7 +129,9 @@ export default function EnumSourcePage({ me }: { me: Me }) {
                           <div className="ge-muted">{f.imported.claim_number ? `Claim ${f.imported.claim_number}: ${f.imported.claim_status}` : f.imported.has_claim ? "Claim not lodged yet" : "No claimant"}</div>
                           {f.changed_since && <div className="row-bad">Changed in Geohub since</div>}</>
                         : r ? (r.ok ? (r.pin ? <span className="row-ok">Registered as {r.pin}</span> : <span className="row-ok">Can be registered{r.area_sqm ? ` · ${Math.round(r.area_sqm).toLocaleString("en-NG")} m²` : ""}{r.closure?.ratio ? ` · closes 1 in ${r.closure.ratio.toLocaleString("en-NG")}` : ""}</span>)
-                          : <span className="row-bad">{r.problems?.join(" ")}</span>)
+                          : <><span className="row-bad">{r.problems?.join(" ")}</span>
+                            {me.role === "registrar" && me.can_write && r.closure?.ratio != null && r.closure.required_ratio != null && r.closure.ratio < r.closure.required_ratio
+                              && <CloseToStart compact busy={busy === "close:" + f.id} onClose={(why) => closeOne(f.id, why)} />}</>)
                         : <span className="ge-muted">Not yet</span>}</td>
                     </tr>
                   );

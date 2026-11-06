@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import MapView from "../components/MapView";
 import { Button, ErrorText, useToast } from "../components/ui";
 import { ApiError, api, type CaptureBody } from "../lib/api";
+import CloseToStart from "../components/CloseToStart";
 import { LAND_USES, area, joinBearing, metres, parseRows, splitBearing } from "../lib/format";
 import type { Check, DxfRead, Me } from "../lib/types";
 import { MAX_DXF, readText } from "../lib/readFile";
@@ -40,6 +41,8 @@ export function CheckResult({ c, onUseFix }: { c: Check; onUseFix?: (leg: number
         {cl && <>
           <dt>Misclosure</dt><dd>{cl.ratio == null ? "closes exactly" : `${metres(cl.misclosure_m)} (ΔE ${cl.misclosure_e} m, ΔN ${cl.misclosure_n} m)`}</dd>
           <dt>Closure</dt><dd>{cl.ratio == null ? "exact" : `1 in ${cl.ratio.toLocaleString("en-NG")}`} <span className="ge-muted">· needs 1 in {cl.required_ratio.toLocaleString("en-NG")}</span></dd>
+          {cl.closed && <><dt>Closed to start</dt><dd>Leg {cl.closed.leg}: {cl.closed.bearing_dms} {cl.closed.distance_m.toFixed(2)} m
+            <span className="ge-muted"> instead of the plan's {cl.closed.plan_bearing_dms} {cl.closed.plan_distance_m.toFixed(2)} m</span></dd></>}
           {cl.adjusted && <><dt>Adjustment</dt><dd>Spread around the legs (Bowditch)</dd></>}
         </>}
       </dl>
@@ -58,6 +61,7 @@ export default function NewParcelPage({ me }: { me: Me }) {
   const [epsg, setEpsg] = useState<number | null>(null);
   const [start, setStart] = useState<[string, string]>(["", ""]);          // the starting point's easting and northing
   const [planArea, setPlanArea] = useState("");                             // the area printed on the plan, to find a misread leg
+  const [closeWhy, setCloseWhy] = useState<string | null>(null);           // a registrar closed it to the start, and why
   const [legs, setLegs] = useState<Row[]>(blank(4, LEG));
   const [points, setPoints] = useState<Row[]>(blank(4, POINT));
   const [paste, setPaste] = useState("");
@@ -104,14 +108,14 @@ export default function NewParcelPage({ me }: { me: Me }) {
       }
       return { method, epsg: epsg ?? undefined, start: { beacon: "", easting: num(e), northing: num(n) },
         legs: filled.map((r) => ({ beacon: r[0].trim(), bearing: joinBearing(r[1], r[2], r[3])!, distance_m: num(r[4]) })),
-        plan_area_sqm: num(planArea) > 0 ? num(planArea) : undefined };
+        plan_area_sqm: num(planArea) > 0 ? num(planArea) : undefined, ...(closeWhy ? { close_to_start: true, close_reason: closeWhy } : {}) };
     }
     if (filled.length < 3) return "A parcel needs at least 3 beacons.";
     for (const [i, r] of filled.entries()) {
       if (!Number.isFinite(num(r[1])) || !Number.isFinite(num(r[2]))) return `Beacon ${i + 1} needs both coordinates.`;
     }
     return { method, epsg: epsg ?? undefined, points: filled.map((r) => ({ beacon: r[0].trim(), x: num(r[1]), y: num(r[2]) })) };
-  }, [method, epsg, start, rows, planArea]);
+  }, [method, epsg, start, rows, planArea, closeWhy]);
   const key = typeof body === "string" ? "" : JSON.stringify(body);
   const fresh = check && check.for === key ? check.c : null;
 
@@ -122,6 +126,18 @@ export default function NewParcelPage({ me }: { me: Me }) {
     catch (e) { setErr(e); setCheck(null); }
     finally { setBusy(null); }
   };
+  /** A registrar closes the traverse to its start (with why), and checks again. */
+  const closeAndCheck = async (reason: string) => {
+    if (typeof body === "string") return;
+    const b = { ...body, close_to_start: true, close_reason: reason };
+    setCloseWhy(reason); setBusy("check"); setErr(null);
+    try { setCheck({ c: await api.check(b), for: JSON.stringify(b) }); }
+    catch (e) { setErr(e); setCheck(null); }
+    finally { setBusy(null); }
+  };
+  const cl = check?.c.closure;
+  const canClose = me.role === "registrar" && me.can_write && method === "traverse" && !closeWhy && !!cl && cl.ratio != null
+    && cl.ratio < cl.required_ratio && !(cl.suspect && cl.fixes && cl.suspect.leg !== cl.fixes.length);
   const register = async () => {
     if (typeof body === "string" || !fresh?.ok) return;
     setBusy("register"); setErr(null);
@@ -252,6 +268,9 @@ export default function NewParcelPage({ me }: { me: Me }) {
           {check ? <>
             {!fresh && <p className="ge-small ge-muted">The survey has changed since this check. Check it again before registering.</p>}
             <CheckResult c={check.c} onUseFix={applyFix} />
+            {canClose && <CloseToStart busy={busy === "check"} onClose={closeAndCheck} />}
+            {closeWhy && <p className="ge-small">Closed to the starting point: “{closeWhy}”{" "}
+              <Button small variant="ghost" onClick={() => { setCloseWhy(null); setCheck(null); }}>Undo</Button></p>}
           </> : <p className="ge-muted">Check the boundary to see its area, how well it closes, and whether it overlaps a registered parcel.</p>}
           <div className="actions">
             <Button variant="primary" busy={busy === "register"} disabled={!fresh?.ok || !me.can_write} onClick={register}>

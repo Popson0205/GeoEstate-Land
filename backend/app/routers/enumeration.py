@@ -23,7 +23,7 @@ from ..db import get_conn
 from ..errors import Problem
 from ..geoestate_id import GeoEstateIDError
 from ..identity import need
-from .parcels import CaptureIn, check, insert_parcel, org_settings, steps
+from .parcels import CaptureIn, check, closed_record, insert_parcel, org_settings, steps
 from .register import LodgeIn, lodge
 
 router = APIRouter(prefix="/enumeration", tags=["enumeration"])
@@ -221,6 +221,15 @@ def ring(geometry: dict) -> list[list[float]]:
     return g["coordinates"][0]
 
 
+def capture_for(f: dict, body: "Pick", fid: UUID) -> CaptureIn:
+    """The feature's survey, closed to its start when a registrar said so (with why)."""
+    c = capture(f["geometry"], f["properties"])
+    reason = body.close.get(fid)
+    if reason is not None and c.method == "traverse":
+        c.close_to_start, c.close_reason = True, reason[:500]
+    return c
+
+
 def capture(geometry: dict, props: dict | None = None) -> CaptureIn:
     """The survey to check: the plot's survey plan when the field team plotted it from one in Geohub (recomputed here
     with the registry's own engine, closure rule and ground control), otherwise the boundary as drawn."""
@@ -268,6 +277,7 @@ async def features(sid: UUID, request: Request, status: str = Query("approved", 
 class Pick(BaseModel):
     feature_ids: list[UUID] = Field(min_length=1, max_length=300)
     lodge_claims: bool = False
+    close: dict[UUID, str] = Field(default_factory=dict, description="Registrars: features whose traverse is closed to its start, with the reason")
 
 
 @router.post("/sources/{sid}/check", summary="Check features as surveys, without registering them")
@@ -277,7 +287,7 @@ async def check_features(sid: UUID, body: Pick, request: Request, user=Depends(n
     for fid in body.feature_ids:
         try:
             f = await geohub(request, f"features/{fid}")
-            c = await check(conn, user, capture(f["geometry"], f["properties"]))
+            c = await check(conn, user, capture_for(f, body, fid))
             out.append({"id": str(fid), "ok": c["ok"], "problems": c["problems"], "warnings": c["warnings"], "area_sqm": c["area_sqm"],
                         "closure": c["closure"], "correction": c["correction"], "method": c["method"],
                         "geometry": c["geometry"], "mapped": mapped(s, f["properties"])})
@@ -320,9 +330,9 @@ async def import_features(sid: UUID, body: Pick, request: Request, user=Depends(
                 f = await geohub(request, f"features/{fid}")
                 if f["status"] != "approved":
                     raise Problem(422, f"It is {f['status']} in Geohub: only approved features are registered.", code="not_approved")
-                c = await check(conn, user, capture(f["geometry"], f["properties"]))
+                c = await check(conn, user, capture_for(f, body, fid))
                 if not c["ok"]:
-                    raise Problem(422, " ".join(c["problems"]), code="not_registrable")
+                    raise Problem(422, " ".join(c["problems"]), code="not_registrable", problems=c["problems"], closure=c["closure"])
                 m = mapped(s, f["properties"])
                 when = (f.get("created_at") or "")[:10]
                 note = f"Enumerated in Geohub ({s['project_name']} / {s['form_name']}) by {f['created_by_name'] or 'a field officer'}" \
@@ -331,7 +341,7 @@ async def import_features(sid: UUID, body: Pick, request: Request, user=Depends(
                 pid, pin = await insert_parcel(conn, user, c["geometry"]["coordinates"][0], c["area_sqm"], c["perimeter_m"], c["beacons"],
                                                status="pending" if pending else "active", method=c["method"], source_epsg=c["epsg"],
                                                closure_error_m=(c["closure"] or {}).get("misclosure_m"), closure_ratio=(c["closure"] or {}).get("ratio"),
-                                               correction=c["correction"],
+                                               correction=c["correction"], closed_to_start=closed_record(c, user),
                                                land_use=m["land_use"][:60], address=m["full_address"][:300], locality=m["locality"][:120], notes=note[:4000],
                                                survey_plan_no=s["defaults"].get("survey_plan_no", ""), surveyor=s["defaults"].get("surveyor", ""))
                 claim = _claim(m)
@@ -339,13 +349,13 @@ async def import_features(sid: UUID, body: Pick, request: Request, user=Depends(
                                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                                    (user["org_id"], fid, sid, f["version"], pid, Jsonb(claim) if claim else None, user["name"]))
                 await audit(conn, user, "parcel.create", "parcel", pid, pin=pin, area_sqm=c["area_sqm"], method="enumeration",
-                            pending=True if pending else None)
+                            pending=True if pending else None, closed_to_start=closed_record(c, user))
                 r = {"id": str(fid), "ok": True, "pin": pin, "parcel_id": str(pid), "status": "pending" if pending else "active"}
             if body.lodge_claims and claim and not pending:
                 r["claim"] = await _try_claim(conn, user, s, pid, fid, claim)
             results.append(r)
         except Problem as e:
-            results.append({"id": str(fid), "ok": False, "problems": e.extra.get("problems") or [e.detail]})
+            results.append({"id": str(fid), "ok": False, "problems": e.extra.get("problems") or [e.detail], "closure": e.extra.get("closure")})
     return results
 
 

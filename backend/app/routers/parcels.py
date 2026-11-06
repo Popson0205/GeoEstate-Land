@@ -106,6 +106,8 @@ class CaptureIn(BaseModel):
     legs: list[Leg] = Field(default_factory=list, max_length=200)
     points: list[Point] = Field(default_factory=list, max_length=500)
     plan_area_sqm: float | None = Field(None, gt=0, lt=1e9, description="The area printed on the survey plan, to compare and to find a misread leg")
+    close_to_start: bool = Field(False, description="Registrars: replace the last leg with the one that returns to the start, as CAD does")
+    close_reason: str = Field("", max_length=500, description="Why the traverse is closed to its start (kept with the parcel)")
 
 
 class ParcelIn(CaptureIn):
@@ -116,6 +118,28 @@ class ParcelIn(CaptureIn):
     survey_plan_no: str = Field("", max_length=80)
     surveyor: str = Field("", max_length=160)
     survey_date: date | None = None
+
+
+def close_to_start(user: dict, body: CaptureIn, plan_legs: list, t, problems: list, warnings: list) -> dict:
+    """Close a traverse the way CAD does: the last leg becomes the line from the last beacon back to the start. Only a
+    registrar, with a reason; and not when the plan's area shows the error is in another leg (closing would then put
+    the error in the wrong place)."""
+    diag = geodesy.leg_fixes(plan_legs, body.plan_area_sqm)
+    last = diag["fixes"][-1]
+    n = len(plan_legs)
+    if user.get("role") != "registrar":
+        problems.append("Only a registrar can close a traverse to its starting point.")
+    if len(body.close_reason.strip()) < 10:
+        problems.append("Say why the traverse is closed to its start (for example, confirmed with the surveyor); the reason is kept with the parcel.")
+    if diag["suspect"] and diag["suspect"]["leg"] != n:
+        problems.append(f"The plan's area points to leg {diag['suspect']['leg']}, not the last leg: closing to the start would put the "
+                        f"error in the wrong leg. Correct leg {diag['suspect']['leg']} instead.")
+    b0, d0 = plan_legs[-1]
+    warnings.append(f"Closed to the starting point: leg {n} is {last['bearing_dms']} {last['distance_m']:.2f} m instead of the plan's "
+                    f"{geodesy.dms(b0)} {d0:.2f} m (the plan misses by {t.misclosure_m:.2f} m, 1 in {t.ratio:,}).")
+    return {"leg": n, "bearing": last["bearing"], "bearing_dms": last["bearing_dms"], "distance_m": last["distance_m"],
+            "plan_bearing_dms": geodesy.dms(b0), "plan_distance_m": round(d0, 3), "plan_misclosure_m": round(t.misclosure_m, 3),
+            "plan_ratio": t.ratio, "reason": body.close_reason.strip()}
 
 
 async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -> dict:
@@ -132,15 +156,22 @@ async def check(conn, user: dict, body: CaptureIn, ignore: UUID | None = None) -
         if epsg == 4326:
             raise Problem(422, "A traverse is walked on a projected grid (metres), not in longitude and latitude.", code="validation",
                           fields={"epsg": ["not projected"]})
-        t = geodesy.traverse((body.start.easting, body.start.northing),
-                             [(geodesy.parse_bearing(l.bearing), l.distance_m) for l in body.legs], s["closure_ratio"])
+        plan_legs = [(geodesy.parse_bearing(l.bearing), l.distance_m) for l in body.legs]
+        t = geodesy.traverse((body.start.easting, body.start.northing), plan_legs, s["closure_ratio"])
+        closed = None
+        if body.close_to_start and t.ratio is not None and t.ratio < s["closure_ratio"] and len(plan_legs) >= 3:
+            closed = close_to_start(user, body, plan_legs, t, problems, warnings)
+            t = geodesy.traverse((body.start.easting, body.start.northing),
+                                 plan_legs[:-1] + [(closed["bearing"], closed["distance_m"])], s["closure_ratio"])
         closure = {"misclosure_m": round(t.misclosure_m, 3), "misclosure_e": round(t.misclosure_e, 3),
                    "misclosure_n": round(t.misclosure_n, 3), "perimeter_m": round(t.perimeter_m, 3), "ratio": t.ratio,
                    "required_ratio": s["closure_ratio"], "adjusted": t.adjusted}
-        if t.ratio is not None and t.ratio < s["closure_ratio"]:
+        if closed:
+            closure.update(closed=closed, misclosure_m=closed["plan_misclosure_m"], ratio=closed["plan_ratio"])
+        elif t.ratio is not None and t.ratio < s["closure_ratio"]:
             problems.append(f"The traverse does not close: it misses by {t.misclosure_m:.2f} m, 1 in {t.ratio:,}. "
                             f"This registry needs 1 in {s['closure_ratio']:,} or better. Check the bearings and distances.")
-            diag = geodesy.leg_fixes([(geodesy.parse_bearing(l.bearing), l.distance_m) for l in body.legs], body.plan_area_sqm)
+            diag = geodesy.leg_fixes(plan_legs, body.plan_area_sqm)
             closure["fixes"] = diag["fixes"]
             closure["suspect"] = diag["suspect"]
             if diag["suspect"]:
@@ -209,7 +240,7 @@ async def check_parcel(body: CaptureIn, user=Depends(need("officer")), conn=Depe
 
 
 PARCEL_SQL = ("SELECT p.id, p.pin, p.status, p.decided_by_name, p.decided_at, p.decision_note, p.correction, p.area_sqm, p.perimeter_m, p.land_use, p.address, p.locality, p.notes, p.method, "
-              "  p.source_epsg, p.closure_error_m, p.closure_ratio, p.survey_plan_no, p.surveyor, p.survey_date, p.retired_reason, "
+              "  p.source_epsg, p.closure_error_m, p.closure_ratio, p.closed_to_start, p.survey_plan_no, p.surveyor, p.survey_date, p.retired_reason, "
               "  p.created_by_name, p.created_at, p.updated_at, ST_X(ST_Centroid(p.geom)) AS lon, ST_Y(ST_Centroid(p.geom)) AS lat, "
               "  (SELECT t.title_no FROM titles t WHERE t.parcel_id = p.id AND t.status = 'current') AS title_no "
               "FROM parcels p ")
@@ -233,12 +264,18 @@ async def create_parcel(body: ParcelIn, user=Depends(need("officer", write=True)
     pid, pin = await insert_parcel(conn, user, c["geometry"]["coordinates"][0], c["area_sqm"], c["perimeter_m"], c["beacons"],
                                    status="pending" if pending else "active", method=c["method"], source_epsg=c["epsg"],
                                    closure_error_m=(c["closure"] or {}).get("misclosure_m"), closure_ratio=(c["closure"] or {}).get("ratio"),
-                                   correction=c["correction"], land_use=body.land_use.strip(), address=body.address.strip(),
+                                   correction=c["correction"], closed_to_start=closed_record(c, user), land_use=body.land_use.strip(), address=body.address.strip(),
                                    locality=body.locality.strip(), notes=body.notes.strip(), survey_plan_no=body.survey_plan_no.strip(),
                                    surveyor=body.surveyor.strip(), survey_date=body.survey_date)
     await audit(conn, user, "parcel.create", "parcel", pid, pin=pin, area_sqm=c["area_sqm"], method=c["method"],
-                pending=True if pending else None)
+                pending=True if pending else None, closed_to_start=closed_record(c, user))
     return await get_parcel(pid, user, conn)
+
+
+def closed_record(c: dict, user: dict) -> dict | None:
+    """What is kept when a registrar closed the traverse to its start."""
+    closed = (c.get("closure") or {}).get("closed")
+    return closed and {k: v for k, v in closed.items() if k != "bearing"} | {"by": user["name"], "by_id": str(user["id"])}
 
 
 def steps(s: dict, kind: str) -> int:
@@ -256,9 +293,10 @@ async def insert_parcel(conn, user, ring, area_sqm, perimeter_m, beacons, *, sta
     s = await cur.fetchone()
     pin = f"{s['pin_prefix']}-{s['n']:06d}"
     cols = {"land_use": "", "address": "", "locality": "", "notes": "", "survey_plan_no": "", "surveyor": "", "survey_date": None,
-            "closure_error_m": None, "closure_ratio": None, "correction": None} | fields
-    if cols["correction"] is not None:
-        cols["correction"] = Jsonb(cols["correction"])
+            "closure_error_m": None, "closure_ratio": None, "correction": None, "closed_to_start": None} | fields
+    for k in ("correction", "closed_to_start"):
+        if cols[k] is not None:
+            cols[k] = Jsonb(cols[k])
     names = ", ".join(cols)
     cur = await conn.execute(
         f"INSERT INTO parcels (org_id, pin, geom, area_sqm, perimeter_m, status, method, source_epsg, created_by, created_by_name, {names}) "

@@ -280,7 +280,10 @@ def leg_fixes(legs: list[tuple[float, float]], plan_area: float | None = None) -
                       "distance_change_m": round(dist - legs[k][1], 2)})
     out = {"fixes": fixes, "suspect": None, "by": None}
     if plan_area:
-        near = [f for f in fixes if abs(f["area_sqm"] - plan_area) <= max(0.5, plan_area * 0.002)]
-        if len(near) == 1:
+        near = sorted((f for f in fixes if abs(f["area_sqm"] - plan_area) <= max(0.5, plan_area * 0.002)),
+                      key=lambda f: abs(f["area_sqm"] - plan_area))
+        # one leg fits the plan's area, or one fits it clearly better than the next (opposite sides of a plot can both
+        # come near: a turned leg on one side looks much like a turned leg on the other)
+        if len(near) == 1 or (len(near) > 1 and abs(near[0]["area_sqm"] - plan_area) * 3 < abs(near[1]["area_sqm"] - plan_area)):
             out["suspect"], out["by"] = near[0], "area"
     return out
