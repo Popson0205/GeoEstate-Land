@@ -18,6 +18,8 @@ import PartyPage from "./pages/PartyPage";
 import PublicLookupPage from "./pages/PublicLookupPage";
 import ControlPage from "./pages/ControlPage";
 import LayoutImportPage from "./pages/LayoutImportPage";
+import EnumerationPage from "./pages/EnumerationPage";
+import EnumSourcePage from "./pages/EnumSourcePage";
 
 /** Land Registry has no sign-in page of its own: someone not signed in goes to Geohub and comes straight back. */
 export default function App() {
@@ -63,6 +65,8 @@ export default function App() {
           <Route path="/parcels/:id" element={<ParcelPage me={me} />} />
           <Route path="/parcels/:id/lodge" element={<LodgePage me={me} />} />
           <Route path="/parcels/:id/extract" element={<ExtractPage me={me} />} />
+          <Route path="/enumeration" element={<EnumerationPage me={me} />} />
+          <Route path="/enumeration/:id" element={<EnumSourcePage me={me} />} />
           <Route path="/instruments" element={<InstrumentsPage />} />
           <Route path="/instruments/:id" element={<InstrumentPage me={me} />} />
           <Route path="/parties/:id" element={<PartyPage />} />

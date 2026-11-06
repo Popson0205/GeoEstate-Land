@@ -57,7 +57,7 @@ export default function SettingsPage({ me }: { me: Me }) {
         </div>
         <div className="actions" style={{ marginTop: 16 }}><Button type="submit" variant="primary" busy={busy === "save"} disabled={ro || !s.data}>Save</Button></div>
       </form>
-      <WorkflowCard readOnly={ro} />
+      <WorkflowCard readOnly={ro} allowed={s.data?.workflows_allowed ?? true} />
       <section className="ge-card">
         <h2>Ground control</h2>
         <p className="ge-small ge-muted" style={{ marginTop: 0 }}>Old plans on the Minna grids can sit metres off the true ground. With control points whose true positions

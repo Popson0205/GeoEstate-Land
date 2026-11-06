@@ -45,7 +45,12 @@ async def org_settings(conn, user: dict) -> dict:
     cur = await conn.execute("SELECT * FROM settings WHERE org_id = %s", (user["org_id"],))
     s = await cur.fetchone()
     return {**s, "grid_name": geodesy.grid_name(s["default_epsg"]), "overlap_tolerance_sqm": float(s["overlap_tolerance_sqm"]),
-            "public_allowed": public_allowed(user)}
+            "public_allowed": public_allowed(user), "workflows_allowed": has(user, "workflows"), "dxf_allowed": has(user, "dxf_import")}
+
+
+def has(user: dict, feature: str) -> bool:
+    """Whether the organization's plan includes a feature (a token without a feature list: everything)."""
+    return not user["features"] or feature in user["features"]
 
 
 @router.get("/grids", summary="The survey grids Land Registry knows")
@@ -225,7 +230,10 @@ async def create_parcel(body: ParcelIn, user=Depends(need("officer", write=True)
 
 def steps(s: dict, kind: str) -> int:
     """How many registrars approve this kind of change in this organization's workflow."""
-    return int((s.get("workflow") or {}).get(kind, 0 if kind == "parcel" else 1))
+    default = 0 if kind == "parcel" else 1
+    if not s.get("workflows_allowed", True):
+        return default                                  # a plan without approval workflows: the standard one
+    return int((s.get("workflow") or {}).get(kind, default))
 
 
 async def insert_parcel(conn, user, ring, area_sqm, perimeter_m, beacons, *, status="active", method, source_epsg, **fields) -> tuple:
@@ -431,6 +439,8 @@ async def get_workflow(user=Depends(need()), conn=Depends(get_conn)):
 
 @router.put("/settings/workflow", summary="Set the organization's workflow (registrars)")
 async def put_workflow(body: WorkflowIn, user=Depends(need("registrar", write=True)), conn=Depends(get_conn)):
+    if not has(user, "workflows"):
+        raise Problem(403, "Your organization's Land Registry plan does not include approval workflows (Land Registry Advanced).", code="no_feature")
     for k, v in body.steps.items():
         if v not in ((0, 1) if k == "parcel" else (0, 1, 2)):
             raise Problem(422, f"{k}: {'0 or 1' if k == 'parcel' else '0, 1 or 2'} approvals.", code="validation", fields={k: ["out of range"]})
@@ -525,6 +535,8 @@ class DxfIn(BaseModel):
 
 @router.post("/parcels/import/dxf", summary="Read the closed boundaries out of a DXF drawing (nothing is saved)")
 async def import_dxf(body: DxfIn, user=Depends(need("officer"))):
+    if not has(user, "dxf_import"):
+        raise Problem(403, "Your organization's Land Registry plan does not include survey plan (DXF) import (Land Registry Advanced).", code="no_feature")
     import anyio
     from .. import dxf
     out = await anyio.to_thread.run_sync(dxf.read, body.content)

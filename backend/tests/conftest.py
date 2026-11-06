@@ -43,6 +43,8 @@ class FakeGeohub:
         self.refresh: dict[str, dict] = {}
         self.calls: list[str] = []
         self.no_product_on_refresh = False
+        self.projects: list[dict] = []           # /id/data: the field data the person can open
+        self.features: dict[str, dict] = {}
 
     def claims(self, role="owner", org="Lagos Lands Bureau", org_id=None, status="active", features=None, limits=None, staff=None,
                name="Ade Registrar"):
@@ -85,6 +87,22 @@ class FakeGeohub:
             if self.no_product_on_refresh:
                 return httpx.Response(403, json={"detail": "Lagos Lands Bureau does not have Land Registry.", "code": "no_product"})
             return httpx.Response(200, json=self.tokens(c))
+        if path.startswith("/id/data/"):
+            if not req.headers.get("authorization", "").startswith("Bearer "):
+                return httpx.Response(401, json={"detail": "Send the access token."})
+            rest = path.removeprefix("/id/data/")
+            if rest == "projects":
+                return httpx.Response(200, json=self.projects)
+            if rest.startswith("features/"):
+                f = self.features.get(rest.split("/")[1])
+                return httpx.Response(200, json=f) if f else httpx.Response(404, json={"detail": "Feature not found.", "code": "not_found"})
+            if rest.endswith("/features"):
+                form = rest.split("/")[1]
+                q = {k: v[0] for k, v in parse_qs(req.url.query.decode()).items()}
+                rows = sorted((f for f in self.features.values() if f["form_id"] == form and f["seq"] > int(q.get("after", 0))
+                               and (not q.get("status") or f["status"] == q["status"])), key=lambda f: f["seq"])
+                lim = int(q.get("limit", 200))
+                return httpx.Response(200, json={"features": rows[:lim], "next": rows[lim - 1]["seq"] if len(rows) > lim else None})
         if path == "/id/revoke":
             return httpx.Response(200, json={"revoked": True})
         if path == "/id/apps":
