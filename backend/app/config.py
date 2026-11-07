@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     id_secret: str = ""
     cookie_secure: bool | None = None          # default: secure when APP_URL is https
 
+    # Other GeoEstate products (LandCheck) ask about title status with this key; the same value is set in each.
+    platform_key: str = ""
+
     log_level: str = "INFO"
 
     @model_validator(mode="after")

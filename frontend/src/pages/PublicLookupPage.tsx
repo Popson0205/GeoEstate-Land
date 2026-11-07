@@ -10,13 +10,14 @@ export default function PublicLookupPage() {
   const { slug = "" } = useParams();
   const [reg, setReg] = useState<{ name: string; shows_holders: boolean } | null>(null);
   const [regErr, setRegErr] = useState<unknown>(null);
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(() => new URLSearchParams(window.location.search).get("q") ?? "");     // ?q= from a LandCheck report
   const [res, setRes] = useState<PublicResult | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { void api.publicRegistry(slug).then(setReg, setRegErr); }, [slug]);
-  const look = async (e: FormEvent) => {
-    e.preventDefault();
+  useEffect(() => { if (q.trim().length >= 3) void look(); }, []);         // eslint-disable-line react-hooks/exhaustive-deps
+  const look = async (e?: FormEvent) => {
+    e?.preventDefault();
     if (q.trim().length < 3) return;
     setBusy(true); setErr(null); setRes(null);
     try { setRes(await api.publicLookup(slug, q.trim())); } catch (x) { setErr(x); } finally { setBusy(false); }
