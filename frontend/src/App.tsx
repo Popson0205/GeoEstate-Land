@@ -22,6 +22,9 @@ import EnumerationPage from "./pages/EnumerationPage";
 import EnumSourcePage from "./pages/EnumSourcePage";
 
 /** Land Registry has no sign-in page of its own: someone not signed in goes to Geohub and comes straight back. */
+/** The shared GeoEstate launch screen (public/geoestate-splash.js): say what is happening while the app starts, and when it is ready. */
+const splash = (window as unknown as { GeoEstateSplash?: { step: (t: string, p?: number) => void; done: () => void } }).GeoEstateSplash;
+
 export default function App() {
   const loc = useLocation();
   const [me, setMe] = useState<Me | null>(null);
@@ -30,13 +33,15 @@ export default function App() {
   const open = loc.pathname.startsWith("/lookup/");          // the public lookup: no sign-in
 
   const load = useCallback(async () => {
-    try { setMe(await api.me()); }
+    splash?.step("Checking your GeoEstate ID", 40);
+    try { const m = await api.me(); splash?.step("Opening the register", 80); setMe(m); }
     catch (e) {
-      if (e instanceof ApiError && e.status === 401 && e.code !== "no_product") { window.location.assign(signInUrl()); return; }
+      if (e instanceof ApiError && e.status === 401 && e.code !== "no_product") { splash?.step("Taking you to sign in", 90); window.location.assign(signInUrl()); return; }
       setStop(e instanceof Error ? e.message : "Land Registry could not open.");
     }
   }, []);
   useEffect(() => { if (!out && !open) void load(); }, [load, out, open]);
+  useEffect(() => { if (me || stop || out || open) splash?.done(); }, [me, stop, out, open]);
   useEffect(() => {
     const gone = (e: Event) => {
       const why = (e as CustomEvent).detail;
