@@ -68,6 +68,16 @@ async def current_user(request: Request, response: Response) -> dict:
     at, rt = request.cookies.get(AT), request.cookies.get(RT)
     g = client()
     claims = None
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer ") and not at and not rt:
+        # another GeoEstate app reading for the person (PolyGIS showing the parcels): a Land Registry access token from
+        # Geohub's token exchange. Reading only: changes come from Land Registry's own pages.
+        if request.method not in ("GET", "HEAD"):
+            raise Problem(403, "Other apps can read Land Registry, not change it.", code="read_only")
+        try:
+            claims = g.verify(auth[7:].strip())
+        except GeoEstateIDError as e:
+            raise Problem(401, str(e), code="invalid_token") from None
     if at:
         try:
             claims = g.verify(at)

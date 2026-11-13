@@ -134,3 +134,22 @@ def test_refreshing_and_losing_the_product(client, person):
     assert p.get("/apps").status_code == 401
     q = person(role="member")
     assert [a["product"] for a in q.get("/apps").json()] == ["hub", "land"]
+
+
+def test_another_app_reads_the_fabric_with_an_exchanged_token(client, person):
+    """PolyGIS shows the parcels as a layer: it calls with a Land Registry access token from Geohub's token exchange,
+    sees what the person may see, and cannot change anything."""
+    off = person(role="member", name="Fabric Reader")
+    r = off.post("/parcels", json={"method": "traverse", "start": {"easting": 540700, "northing": 732000}, "legs": SQUARE, "locality": "Ikeja",
+                                   "land_use": "commercial"})
+    assert r.status_code == 201, r.text
+    token = HUB.token({**HUB.claims(role="member", name="Fabric Reader"), "act": {"sub": "gis"}})
+    client.cookies.clear()
+    fc = client.get("/parcels.geojson", headers={"Authorization": f"Bearer {token}"})
+    assert fc.status_code == 200, fc.text
+    mine = next(f for f in fc.json()["features"] if f["properties"]["pin"] == r.json()["pin"])
+    assert mine["properties"]["locality"] == "Ikeja" and mine["properties"]["land_use"] == "commercial" and "title_no" in mine["properties"]
+    assert client.post("/parcels/check", json={}, headers={"Authorization": f"Bearer {token}", "X-GeoEstate": "1"}).status_code == 403
+    assert client.get("/parcels.geojson", headers={"Authorization": "Bearer junk"}).status_code == 401
+    other = HUB.token(HUB.claims(role="owner", org_id="00000000-0000-4000-8000-000000000044", name="Elsewhere"))
+    assert all(f["properties"]["pin"] != r.json()["pin"] for f in client.get("/parcels.geojson", headers={"Authorization": f"Bearer {other}"}).json()["features"])
