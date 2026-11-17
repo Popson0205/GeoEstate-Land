@@ -365,10 +365,16 @@ async def fabric(bbox: str | None = None, user=Depends(need()), conn=Depends(get
         except ValueError:
             raise Problem(422, "bbox is west,south,east,north.", code="validation")
         where.append("geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)"); params += [w, s_, e, n]
-    cur = await conn.execute(f"SELECT id, pin, status, area_sqm, land_use, ST_AsGeoJSON(geom, 8) AS g FROM parcels WHERE {' AND '.join(where)} "
-                             "LIMIT 20000", params)
+    where = [w.replace("org_id", "p.org_id").replace("status IN", "p.status IN").replace("geom &&", "p.geom &&") for w in where]
+    cur = await conn.execute(
+        "SELECT p.id, p.pin, p.status, p.area_sqm, p.land_use, p.locality, p.address, p.survey_plan_no, p.surveyor, p.survey_date, "
+        "t.title_no, t.kind AS title_kind, ST_AsGeoJSON(p.geom, 8) AS g FROM parcels p "
+        f"LEFT JOIN titles t ON t.parcel_id = p.id AND t.status = 'current' WHERE {' AND '.join(where)} ORDER BY p.pin LIMIT 20000", params)
     feats = [{"type": "Feature", "id": str(r["id"]), "geometry": json.loads(r["g"]),
-              "properties": {"id": str(r["id"]), "pin": r["pin"], "status": r["status"], "area_sqm": float(r["area_sqm"]), "land_use": r["land_use"]}}
+              "properties": {"id": str(r["id"]), "pin": r["pin"], "status": r["status"], "area_sqm": float(r["area_sqm"]), "land_use": r["land_use"],
+                             "locality": r["locality"], "address": r["address"], "title_no": r["title_no"], "title_kind": r["title_kind"],
+                             "survey_plan_no": r["survey_plan_no"], "surveyor": r["surveyor"],
+                             "survey_date": r["survey_date"].isoformat() if r["survey_date"] else None}}
              for r in await cur.fetchall()]
     cur = await conn.execute("SELECT ST_XMin(e) AS w, ST_YMin(e) AS s, ST_XMax(e) AS e, ST_YMax(e) AS n FROM "
                              "(SELECT ST_Extent(geom) AS e FROM parcels WHERE org_id = %s AND status = 'active') x", (user["org_id"],))
