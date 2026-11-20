@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { api } from "../lib/api";
 import { ROLE_NAME } from "../lib/format";
+import { brandLockup } from "../lib/identity";
 import type { App, Me } from "../lib/types";
 
 const WHAT: Record<string, string> = { hub: "Field data, maps and dashboards", land: "Parcels, titles and transfers",
@@ -66,7 +67,12 @@ export default function Bar({ me, onSignOut }: { me: Me; onSignOut: () => void }
   return (
     <>
       <header className="ge-bar">
-        <a className="ge-brand" href="/"><img src="/logo.png" alt="GeoEstate" /><span>GeoEstate <strong>Land Registry</strong></span></a>
+        {(() => { const lk = brandLockup(me); return (
+          <a className="ge-brand" href="/">
+            <img src={lk.logo_url ?? "/logo.png"} alt="" />
+            {lk.branded ? <span>{lk.name}</span> : <span>GeoEstate <strong>Land Registry</strong></span>}
+          </a>
+        ); })()}
         <nav className={`land-nav${open ? " is-open" : ""}`} aria-label="Sections" onClick={() => setOpen(false)}>
           {links.filter((l) => l[2]).map(([to, label]) => <NavLink key={to} to={to} end={to === "/" || to === "/parcels/new"}>{label}</NavLink>)}
         </nav>

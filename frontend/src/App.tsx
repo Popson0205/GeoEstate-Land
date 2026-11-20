@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import Bar from "./components/Bar";
 import { ApiError, api, signInUrl } from "./lib/api";
+import { applyOrgBrand } from "./lib/identity";
 import type { Me } from "./lib/types";
 import ActivityPage from "./pages/ActivityPage";
 import HomePage from "./pages/HomePage";
@@ -34,7 +35,7 @@ export default function App() {
 
   const load = useCallback(async () => {
     splash?.step("Checking your GeoEstate ID", 40);
-    try { const m = await api.me(); splash?.step("Opening the register", 80); setMe(m); }
+    try { const m = await api.me(); splash?.step("Opening the register", 80); applyOrgBrand(m.org_brand); setMe(m); }
     catch (e) {
       if (e instanceof ApiError && e.status === 401 && e.code !== "no_product") { splash?.step("Taking you to sign in", 90); window.location.assign(signInUrl()); return; }
       setStop(e instanceof Error ? e.message : "Land Registry could not open.");

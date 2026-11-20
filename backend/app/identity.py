@@ -60,6 +60,8 @@ def person(claims: dict) -> dict:
     status = p.get("status")
     return {"id": claims["sub"], "name": claims["name"], "email": claims["email"], "org_id": org.get("id"),
             "org_name": org.get("name"), "org_slug": org.get("slug"), "org_role": org.get("role"), "role": role, "staff_role": claims.get("staff_role"),
+            # The organization's white-label identity, carried in the GeoEstate ID token; applied at runtime (one build).
+            "org_brand": org.get("brand"),
             "product": p or None, "licence": status, "features": p.get("features", []), "limits": p.get("limits", {}),
             "can_write": status in ("demo", "active", "grace"), "claims": claims}
 
