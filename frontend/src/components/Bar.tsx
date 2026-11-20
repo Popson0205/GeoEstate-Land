@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { BRAND } from "../brand";
 import { api } from "../lib/api";
 import { ROLE_NAME } from "../lib/format";
+import { brandLockup } from "../lib/identity";
 import type { App, Me } from "../lib/types";
 
 const WHAT: Record<string, string> = { hub: "Field data, maps and dashboards", land: "Parcels, titles and transfers",
@@ -14,9 +14,9 @@ const longDay = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDat
 /** What the licence means today, in Geohub's words (the GeoEstate UI kit's licenceNotice). */
 export function licenceNotice(p: Me["product"]): { tone: string; text: string } | null {
   if (!p) return null;
-  if (p.status === "expired") return { tone: "bad", text: `Your organization's ${BRAND.product} subscription has ended, so it is read-only: you can view and export your work but not add or change anything. Renew with ${BRAND.vendor} to carry on.` };
-  if (p.status === "grace") return { tone: "warn", text: `Your organization's ${BRAND.product} subscription ended on ${longDay(p.subscription_ends)}. Everything works until ${longDay(p.grace_ends)}; after that it is read-only. Renew with ${BRAND.vendor}.` };
-  if (p.status === "demo") return { tone: "info", text: `You are on a ${BRAND.product} demo until ${longDay(p.subscription_ends)}. Ask ${BRAND.vendor} for an invoice to keep using it.` };
+  if (p.status === "expired") return { tone: "bad", text: "Your organization's Land Registry subscription has ended, so it is read-only: you can view and export your work but not add or change anything. Renew with GeoEstate NIG Limited to carry on." };
+  if (p.status === "grace") return { tone: "warn", text: `Your organization's Land Registry subscription ended on ${longDay(p.subscription_ends)}. Everything works until ${longDay(p.grace_ends)}; after that it is read-only. Renew with GeoEstate NIG Limited.` };
+  if (p.status === "demo") return { tone: "info", text: `You are on a Land Registry demo until ${longDay(p.subscription_ends)}. Ask GeoEstate NIG Limited for an invoice to keep using it.` };
   return null;
 }
 
@@ -33,12 +33,12 @@ function Apps({ apps }: { apps: App[] }) {
   if (apps.length < 2) return null;
   return (
     <div className="ge-apps" ref={ref}>
-      <button type="button" className="ge-apps-btn" aria-label={`${BRAND.suite} apps`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="ge-apps-btn" aria-label="GeoEstate apps" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">{[5.5, 12, 18.5].flatMap((y) => [5.5, 12, 18.5].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.8" fill="currentColor" />))}</svg>
       </button>
       {open && (
-        <div className="ge-apps-pop" role="menu" aria-label={`${BRAND.suite} apps`}>
-          <div className="ge-apps-head"><strong>{BRAND.suite} apps</strong><span>One sign-in for all of them</span></div>
+        <div className="ge-apps-pop" role="menu" aria-label="GeoEstate apps">
+          <div className="ge-apps-head"><strong>GeoEstate apps</strong><span>One sign-in for all of them</span></div>
           {apps.map((a) => {
             const body = <>
               <span className="ge-app-tile" aria-hidden="true">{a.name.slice(0, 1)}</span>
@@ -67,7 +67,12 @@ export default function Bar({ me, onSignOut }: { me: Me; onSignOut: () => void }
   return (
     <>
       <header className="ge-bar">
-        <a className="ge-brand" href="/"><img src={BRAND.logo} alt={BRAND.suite} /><span>{BRAND.suite} <strong>{BRAND.product}</strong></span></a>
+        {(() => { const lk = brandLockup(me); return (
+          <a className="ge-brand" href="/">
+            <img src={lk.logo_url ?? "/logo.png"} alt="" />
+            {lk.branded ? <span>{lk.name}</span> : <span>GeoEstate <strong>Land Registry</strong></span>}
+          </a>
+        ); })()}
         <nav className={`land-nav${open ? " is-open" : ""}`} aria-label="Sections" onClick={() => setOpen(false)}>
           {links.filter((l) => l[2]).map(([to, label]) => <NavLink key={to} to={to} end={to === "/" || to === "/parcels/new"}>{label}</NavLink>)}
         </nav>
