@@ -8,6 +8,8 @@ import { useLoad } from "../lib/useLoad";
 export default function MapPage() {
   const go = useNavigate();
   const fabric = useLoad(() => api.fabric());
+  const s = useLoad(() => api.settings());
+  const publicBase = s.data && s.data.public_lookup !== "off" && s.data.org_slug ? `/lookup/${s.data.org_slug}` : null;
   const n = fabric.data?.features.length ?? 0;
   return (
     <div className="map-page">
@@ -16,7 +18,7 @@ export default function MapPage() {
         <span className="ge-muted">{fabric.data ? (n ? `${n.toLocaleString("en-NG")} active parcel${n === 1 ? "" : "s"} · click one to open it` : "No parcels yet") : "Loading…"}</span>
       </div>
       <ErrorText error={fabric.error} />
-      <MapView fabric={fabric.data} onSelect={(id) => go(`/parcels/${id}`)} label="Map of the parcel fabric" />
+      <MapView fabric={fabric.data} onSelect={(id) => go(`/parcels/${id}`)} label="Map of the parcel fabric" publicBase={publicBase} />
     </div>
   );
 }

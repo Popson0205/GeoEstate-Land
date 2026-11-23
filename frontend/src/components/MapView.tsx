@@ -43,11 +43,13 @@ export function bounds(g: GeoJSON.Polygon | GeoJSON.FeatureCollection | null | u
  * The fabric on a map: every active parcel (navy, PINs from close in), the parcel in focus (green), a boundary being
  * checked (dashed; red when it cannot be registered). Clicking a parcel calls onSelect with its id.
  */
-export default function MapView({ fabric, focus, preview, previewOk = true, onSelect, label = "Map of the parcels", height = 420, line, onMapClick, fit = true }: {
+export default function MapView({ fabric, focus, preview, previewOk = true, onSelect, label = "Map of the parcels", height = 420, line, onMapClick, fit = true, publicBase = null }: {
   fabric?: GeoJSON.FeatureCollection | null; focus?: GeoJSON.Polygon | null; preview?: GeoJSON.Polygon | GeoJSON.FeatureCollection | null; previewOk?: boolean;
   onSelect?: (id: string) => void; label?: string; height?: number | string;
   /** a line being drawn (a cut line), and clicks on the map, in longitude/latitude */
   line?: [number, number][]; onMapClick?: (lonlat: [number, number]) => void; fit?: boolean;
+  /** when the organization's public lookup is on, the "/lookup/<slug>" base, so the popup offers an outside link */
+  publicBase?: string | null;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const [base, setBase] = useState<Base>(() => { try { return (localStorage.getItem(SAVED) as Base) === "imagery" ? "imagery" : "streets"; } catch { return "streets"; } });
@@ -62,6 +64,8 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
   const fitted = useRef(false);
   const select = useRef(onSelect);
   select.current = onSelect;
+  const pub = useRef(publicBase);
+  pub.current = publicBase;
 
   const paint = () => {
     const m = map.current;
@@ -112,8 +116,23 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
       m.addLayer({ id: "line-pt", type: "circle", source: "line", filter: ["==", ["geometry-type"], "Point"],
         paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": RED, "circle-stroke-width": 2 } });
       m.on("click", (e) => { if (clicked.current) clicked.current([e.lngLat.lng, e.lngLat.lat]); });
+      // Clicking a parcel reveals its details in a popup, with a button to open it (and an outside lookup link when on).
       m.on("click", "fabric-fill", (e) => {
-        if (clicked.current) return; const id = e.features?.[0]?.properties?.id; if (id && select.current) select.current(String(id)); });
+        if (clicked.current) return;
+        const p = e.features?.[0]?.properties; if (!p) return;
+        const el = document.createElement("div"); el.className = "map-popup";
+        const line1 = document.createElement("div"); line1.className = "mp-pin"; line1.textContent = String(p.pin ?? "Parcel"); el.appendChild(line1);
+        const meta = document.createElement("div"); meta.className = "mp-meta";
+        const bits = [p.land_use ? String(p.land_use) : null,
+          p.area_sqm != null ? `${Number(p.area_sqm).toLocaleString("en-NG", { maximumFractionDigits: 0 })} m²` : null,
+          p.status && p.status !== "active" ? String(p.status) : null].filter(Boolean);
+        meta.textContent = bits.join(" · "); el.appendChild(meta);
+        const row = document.createElement("div"); row.className = "mp-actions";
+        if (select.current) { const b = document.createElement("button"); b.type = "button"; b.className = "ge-btn ge-btn-sm ge-btn-primary"; b.textContent = "Open"; b.onclick = () => select.current?.(String(p.id)); row.appendChild(b); }
+        if (pub.current && p.pin) { const a = document.createElement("a"); a.className = "ge-btn ge-btn-sm"; a.textContent = "Public link"; a.href = `${pub.current}?q=${encodeURIComponent(String(p.pin))}`; a.target = "_blank"; a.rel = "noreferrer"; row.appendChild(a); }
+        el.appendChild(row);
+        new maplibregl.Popup({ closeButton: true, offset: 10, maxWidth: "260px" }).setLngLat(e.lngLat).setDOMContent(el).addTo(m);
+      });
       m.on("mouseenter", "fabric-fill", () => { if (select.current && !clicked.current) m.getCanvas().style.cursor = "pointer"; });
       m.on("mouseleave", "fabric-fill", () => { m.getCanvas().style.cursor = clicked.current ? "crosshair" : ""; });
       ready.current = true;
