@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { Folio } from "../components/RegisterView";
+import PlanDrawing from "../components/PlanDrawing";
 import { ErrorText } from "../components/ui";
 import { api } from "../lib/api";
 import { area, day, metres, when } from "../lib/format";
@@ -30,6 +31,7 @@ export default function ExtractPage({ me }: { me: Me }) {
           <dt>Grid</dt><dd>{x.grid_name}</dd>
           <dt>Beacons</dt><dd className="mono" style={{ fontWeight: 400 }}>{x.beacons.map((b) => `${b.name}${b.easting != null ? ` (${b.easting}E, ${b.northing}N)` : ` (${b.lat.toFixed(6)}, ${b.lon.toFixed(6)})`}`).join("; ")}</dd>
         </dl>
+        {x.beacons.length >= 3 && <figure className="extract-plan"><PlanDrawing beacons={x.beacons} /><figcaption>Survey plan — bearings and distances from the beacon coordinates. Not to scale.</figcaption></figure>}
         <h2>B. Title and proprietors · C. Encumbrances</h2>
         <Folio r={r.data} links={false} />
         {pending.length > 0 && <><h2>Dealings lodged and not yet registered</h2>

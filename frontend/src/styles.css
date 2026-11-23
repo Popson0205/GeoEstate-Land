@@ -147,3 +147,10 @@ input.sr-only:focus-visible + *, label.ge-btn:focus-within { outline: 2px solid 
 .capture.is-legs th:nth-child(6) { width: 104px; }
 .capture.is-legs td input { text-align: right; }
 .capture.is-legs td:nth-child(2) input { text-align: left; }
+
+/* Survey plan drawing (parcel page and the register extract) */
+.plan-figure { margin: 0; display: flex; justify-content: center; background: #fff; border: 1px solid var(--line, #dfe3ea); border-radius: 10px; padding: 12px; }
+.extract-plan { margin: 14px 0 0; text-align: center; }
+.extract-plan svg { max-width: 460px; }
+.extract-plan figcaption { margin-top: 6px; font-size: 12px; color: #667085; }
+@media print { .extract-plan svg { max-width: 380px; } .plan-figure { break-inside: avoid; } .extract-plan { break-inside: avoid; } }

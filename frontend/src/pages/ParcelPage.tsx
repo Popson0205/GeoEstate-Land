@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import MapView from "../components/MapView";
+import PlanDrawing from "../components/PlanDrawing";
 import { Button, ErrorText, useAction } from "../components/ui";
 import { api, type ParcelDetails } from "../lib/api";
 import { LAND_USES, area, day, metres, when } from "../lib/format";
@@ -158,7 +159,9 @@ export default function ParcelPage({ me }: { me: Me }) {
         </section>
       </div>
       <section className="ge-card" style={{ marginTop: 18 }}>
-        <h2>Beacons</h2>
+        <h2>Survey plan</h2>
+        <figure className="plan-figure"><PlanDrawing beacons={x.beacons} /></figure>
+        <h2 style={{ marginTop: 18 }}>Beacons</h2>
         <div className="table-wrap">
           <table className="ge-table">
             <thead><tr><th>#</th><th>Beacon</th>{projected && <><th className="num">Easting</th><th className="num">Northing</th></>}<th className="num">Latitude</th><th className="num">Longitude</th></tr></thead>
