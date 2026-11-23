@@ -110,20 +110,14 @@ def union(polys: list[Polygon]) -> Polygon:
 
 
 def beacons(poly: Polygon, known: list[dict], epsg: int) -> list[dict]:
-    """The new parcel's beacons: names kept where they match the old beacons, new ones numbered N1, N2…"""
+    """The new parcel's beacons, numbered in sequence around the boundary (N1, N2, N3…) so a split piece reads cleanly
+    with no repeats. (`known` is accepted for signature compatibility; corner identity is carried by the coordinates
+    and the parcel's lineage, not by reused names.)"""
     ring = list(poly.exterior.coords)[:-1]
     grid = geodesy.from_wgs84(ring, epsg) if epsg != 4326 else ring
-    out, n = [], 0
-    for i, (lon, lat) in enumerate(ring):
-        match = next((b for b in known if _close((b["lon"], b["lat"]), (lon, lat))), None)
-        if match:
-            name = match["name"]
-        else:
-            n += 1
-            name = f"N{n}"
-        out.append({"seq": i + 1, "name": name, "lon": round(lon, 9), "lat": round(lat, 9),
-                    "easting": round(grid[i][0], 3) if epsg != 4326 else None, "northing": round(grid[i][1], 3) if epsg != 4326 else None})
-    return out
+    return [{"seq": i + 1, "name": f"N{i + 1}", "lon": round(lon, 9), "lat": round(lat, 9),
+             "easting": round(grid[i][0], 3) if epsg != 4326 else None, "northing": round(grid[i][1], 3) if epsg != 4326 else None}
+            for i, (lon, lat) in enumerate(ring)]
 
 
 def describe(poly: Polygon) -> dict:

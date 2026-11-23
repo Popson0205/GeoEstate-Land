@@ -60,6 +60,7 @@ a.ge-app:hover { background: var(--ge-navy-50); }
 .ge-badge-bad { background: var(--ge-bad-50); color: var(--ge-bad); } .ge-badge-info { background: var(--ge-info-50); color: var(--ge-info); }
 .ge-table { width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; }
 .ge-table th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ge-muted); padding: 10px 14px; border-bottom: 1px solid var(--ge-line); background: #f8f9fc; }
+.ge-table th.num { text-align: right; }   /* numeric headers sit over their right-aligned values */
 .ge-table td { padding: 10px 14px; border-bottom: 1px solid var(--ge-line); }
 
 /* the licence notice under the bar, in Geohub's words */
