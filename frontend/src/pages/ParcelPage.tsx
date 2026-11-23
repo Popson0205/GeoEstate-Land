@@ -89,6 +89,8 @@ export default function ParcelPage({ me }: { me: Me }) {
   const p = useLoad(() => api.parcel(id), [id]);
   const fabric = useLoad(() => api.fabric());
   const reg = useLoad(() => api.register(id), [id]);
+  const settings = useLoad(() => api.settings());
+  const publicBase = settings.data && settings.data.public_lookup !== "off" && settings.data.org_slug ? `/lookup/${settings.data.org_slug}` : null;
   const [editing, setEditing] = useState(false);
   if (p.error) return <><h1>Parcel</h1><ErrorText error={p.error} /><p><Link to="/">Back to the register</Link></p></>;
   if (!p.data) return <p className="loading">Loading the parcel…</p>;
@@ -102,6 +104,7 @@ export default function ParcelPage({ me }: { me: Me }) {
           {{ active: "Active", pending: "Waiting for approval", retired: "Retired", rejected: "Rejected" }[x.status]}</span></h1>
         <div className="actions">
           <Link className="ge-btn ge-btn-sm" to={`/parcels/${x.id}/extract`}>Register extract</Link>
+          {publicBase && <a className="ge-btn ge-btn-sm" href={`${publicBase}?q=${encodeURIComponent(x.pin)}`} target="_blank" rel="noreferrer">Public link</a>}
           {canEdit && !editing && <Button small onClick={() => setEditing(true)}>Edit details</Button>}
           {canEdit && <Link className="ge-btn ge-btn-sm" to={`/parcels/${x.id}/lodge?kind=subdivision`}>Subdivide</Link>}
           {canEdit && x.neighbours.length > 0 && <Link className="ge-btn ge-btn-sm" to={`/parcels/${x.id}/lodge?kind=amalgamation`}>Amalgamate</Link>}
@@ -120,7 +123,7 @@ export default function ParcelPage({ me }: { me: Me }) {
         </p>
       )}
       <div className="two">
-        <MapView fabric={fabric.data} focus={x.geometry} onSelect={(nid) => nid !== x.id && go(`/parcels/${nid}`)} height={380} label={`Map of ${x.pin}`} />
+        <MapView fabric={fabric.data} focus={x.geometry} onSelect={(nid) => nid !== x.id && go(`/parcels/${nid}`)} height={380} label={`Map of ${x.pin}`} publicBase={publicBase} />
         <section className="ge-card">
           {editing ? <Edit p={x} onSaved={(n) => { p.setData(n); setEditing(false); }} onCancel={() => setEditing(false)} /> : (
             <dl className="facts">
