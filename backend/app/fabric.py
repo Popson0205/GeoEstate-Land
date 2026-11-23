@@ -38,6 +38,68 @@ def pieces(parent: Polygon, line_lonlat: list[tuple[float, float]]) -> list[Poly
     return out
 
 
+def split_multi(parent: Polygon, lines_lonlat: list[list[tuple[float, float]]]) -> list[Polygon]:
+    """The parcel cut by several lines at once (e.g. the parallel cuts of an equal-parts split), largest first."""
+    polys = [parent]
+    for ln in lines_lonlat:
+        if len(ln) < 2:
+            continue
+        line = LineString(ln)
+        nxt: list[Polygon] = []
+        for p in polys:
+            parts = [g for g in split(p, line).geoms if isinstance(g, Polygon)] if line.intersects(p) else [p]
+            nxt += parts if len(parts) >= 2 else [p]
+        polys = nxt
+    if len(polys) < 2:
+        raise Problem(422, "The cuts do not divide the parcel.", code="not_divided")
+    polys = [orient(p, 1.0) for p in polys]
+    out = sorted(polys, key=lambda p: -geodesy.boundary(list(p.exterior.coords)[:-1]).area_sqm)
+    small = [a for a in (geodesy.boundary(list(p.exterior.coords)[:-1]).area_sqm for p in out) if a < MIN_PIECE_SQM]
+    if small:
+        raise Problem(422, f"The cuts leave a sliver of {small[0]:.1f} m². Use fewer parts, or a different direction.", code="sliver")
+    return out
+
+
+def equal_parts(parent: Polygon, n: int, bearing_deg: float, epsg: int) -> tuple[list[list[tuple[float, float]]], list[Polygon]]:
+    """n equal-area parcels, as parallel strips stacked along the bearing. Returns the n-1 cut lines (lon/lat) and the
+    pieces. Area is balanced in the parcel's grid (planar, exact enough for a single parcel); the pieces are then
+    measured geodesically like any other."""
+    if not 2 <= n <= 20:
+        raise Problem(422, "Choose between 2 and 20 parts.", code="validation", fields={"n": ["out of range"]})
+    ring_ll = list(parent.exterior.coords)[:-1]
+    ring_m = geodesy.from_wgs84(ring_ll, epsg)
+    poly_m = Polygon(ring_m)
+    if not poly_m.is_valid:
+        poly_m = poly_m.buffer(0)
+    total = poly_m.area
+    b = math.radians(bearing_deg)
+    dx, dy = math.sin(b), math.cos(b)                   # unit vector along the bearing, in (easting, northing)
+    us = [x * dx + y * dy for x, y in ring_m]           # coordinate along the bearing
+    vs = [x * dy - y * dx for x, y in ring_m]           # coordinate across it (perp = (dy, -dx))
+    umin, umax = min(us), max(us)
+    vmin, vmax = min(vs) - 50, max(vs) + 50
+    to_en = lambda u, v: (u * dx + v * dy, u * dy - v * dx)   # noqa: E731  (u,v) back to (easting, northing)
+
+    def area_below(t: float) -> float:
+        rect = Polygon([to_en(umin - 50, vmin), to_en(t, vmin), to_en(t, vmax), to_en(umin - 50, vmax)])
+        return poly_m.intersection(rect).area
+
+    lines: list[list[tuple[float, float]]] = []
+    for k in range(1, n):
+        target = total * k / n
+        lo, hi = umin, umax
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if area_below(mid) < target:
+                lo = mid
+            else:
+                hi = mid
+        t = (lo + hi) / 2
+        seg_en = [to_en(t, vmin), to_en(t, vmax)]
+        lines.append([(round(lon, 9), round(lat, 9)) for lon, lat in geodesy.to_wgs84(seg_en, epsg)])
+    return lines, split_multi(parent, lines)
+
+
 def union(polys: list[Polygon]) -> Polygon:
     """Neighbours as one parcel: they must touch along a boundary, not just at a corner."""
     u = unary_union([p.buffer(EPS_DEG, join_style=2) for p in polys]).buffer(-EPS_DEG, join_style=2)

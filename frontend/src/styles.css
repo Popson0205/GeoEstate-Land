@@ -160,3 +160,7 @@ input.sr-only:focus-visible + *, label.ge-btn:focus-within { outline: 2px solid 
 .map-popup .mp-pin { font-weight: 700; font-size: 15px; color: var(--ge-navy); }
 .map-popup .mp-meta { margin-top: 2px; font-size: 13px; color: #475467; }
 .map-popup .mp-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* Two fields side by side (subdivision tools) */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 560px) { .two-col { grid-template-columns: 1fr; } }
