@@ -594,7 +594,9 @@ async def apply_fabric(conn, user, ins, parcel, kind, d):
     cur = await conn.execute("SELECT b.name, b.lon, b.lat FROM beacons b WHERE b.parcel_id = ANY(%s)", (ids,))
     known = await cur.fetchall()
     if kind == "subdivision":
-        shapes = fabric.pieces(await parcel_shape(conn, first["id"]), [tuple(x) for x in d["cut"]])
+        geom = await parcel_shape(conn, first["id"])
+        shapes = fabric.split_multi(geom, [[tuple(p) for p in ln] for ln in d["cuts"]]) if d.get("cuts") \
+            else fabric.pieces(geom, [tuple(x) for x in d["cut"]])
     else:
         shapes = [fabric.union([await parcel_shape(conn, x) for x in ids])]
     regs = [await current(conn, x) for x in ids]
