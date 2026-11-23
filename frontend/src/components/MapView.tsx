@@ -2,11 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl, { type ExpressionSpecification, type GeoJSONSource, type LngLatBoundsLike, type Map as MlMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-// OpenStreetMap's own tile servers refuse apps (403 "Access blocked"), so the maps come from Esri's, which need no key.
-// VITE_BASEMAP_URL replaces the street map (e.g. a MapTiler or Stadia address with your key).
-const STREETS = import.meta.env.VITE_BASEMAP_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
-const IMAGERY = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const credit = (u: string) => (/arcgis|esri/i.test(u) ? "Esri, Maxar, Earthstar Geographics, HERE, Garmin, © OpenStreetMap contributors" : "© OpenStreetMap contributors");
+// Basemaps are configurable, so a deployment can point them at any tile source it is licensed to use — a MapTiler or
+// Stadia key, Bing, or Google's official Map Tiles API (keyed). Defaults are Esri's, which need no key and serve
+// high-detail imagery (to ~level 21+) over most towns. Do NOT point these at the unofficial mt.google.com endpoints:
+// that breaches Google's terms and the tiles get cut off — use the Map Tiles API URL (with your key) instead.
+//   VITE_BASEMAP_URL / VITE_BASEMAP_IMAGERY_URL  — street and satellite tile URL templates ({z}/{x}/{y})
+//   VITE_BASEMAP_*_MAXZOOM                        — highest level each source actually serves (beyond it, tiles upscale)
+//   VITE_BASEMAP_*_ATTRIBUTION                    — the credit line the provider requires
+//   VITE_MAP_MAX_ZOOM                             — how far in the map lets you zoom (default 22, ~sub-metre)
+const env = import.meta.env;
+const STREETS = env.VITE_BASEMAP_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
+const IMAGERY = env.VITE_BASEMAP_IMAGERY_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const num = (v: unknown, d: number) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+const STREETS_MAXZOOM = num(env.VITE_BASEMAP_STREETS_MAXZOOM, 19);
+const IMAGERY_MAXZOOM = num(env.VITE_BASEMAP_IMAGERY_MAXZOOM, 20);
+const MAX_ZOOM = num(env.VITE_MAP_MAX_ZOOM, 22);
+const FIT_MAX_ZOOM = num(env.VITE_MAP_FIT_MAX_ZOOM, 20);
+const credit = (u: string, override?: string) => override
+  || (/arcgis|esri/i.test(u) ? "Esri, Maxar, Earthstar Geographics, HERE, Garmin, © OpenStreetMap contributors"
+    : /google/i.test(u) ? "© Google" : "© OpenStreetMap contributors");
 type Base = "streets" | "imagery";
 const SAVED = "land.basemap";
 const NAVY = "#1b2b5e", GREEN = "#2f8a34", RED = "#b42318", AMBER = "#b07800";
@@ -61,7 +75,7 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
     m.setPaintProperty("preview-fill", "fill-color", ok ? GREEN : RED);
     if (!fit && fitted.current) return;
     const b = bounds(pv ?? fo ?? f ?? null);
-    if (b) { m.fitBounds(b, { padding: 48, maxZoom: 19, duration: 0 }); fitted.current = true; }
+    if (b) { m.fitBounds(b, { padding: 36, maxZoom: FIT_MAX_ZOOM, duration: 0 }); fitted.current = true; }
   };
 
   useEffect(() => {
@@ -69,11 +83,11 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
     const m = new maplibregl.Map({
       container: el.current, attributionControl: { compact: true },
       style: { version: 8, glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-        sources: { base: { type: "raster", tiles: [STREETS], tileSize: 256, attribution: credit(STREETS), maxzoom: 19 },
-          imagery: { type: "raster", tiles: [IMAGERY], tileSize: 256, attribution: credit(IMAGERY), maxzoom: 19 } },
+        sources: { base: { type: "raster", tiles: [STREETS], tileSize: 256, attribution: credit(STREETS, env.VITE_BASEMAP_STREETS_ATTRIBUTION), maxzoom: STREETS_MAXZOOM },
+          imagery: { type: "raster", tiles: [IMAGERY], tileSize: 256, attribution: credit(IMAGERY, env.VITE_BASEMAP_IMAGERY_ATTRIBUTION), maxzoom: IMAGERY_MAXZOOM } },
         layers: [{ id: "base", type: "raster", source: "base", layout: { visibility: baseRef.current === "streets" ? "visible" : "none" } },
           { id: "imagery", type: "raster", source: "imagery", layout: { visibility: baseRef.current === "imagery" ? "visible" : "none" } }] },
-      center: [8.0, 9.0], zoom: 5.2,
+      center: [8.0, 9.0], zoom: 5.2, maxZoom: MAX_ZOOM,
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     m.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
