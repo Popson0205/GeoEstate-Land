@@ -83,6 +83,9 @@ class LodgeIn(BaseModel):
     # subdivision: the cut line, in longitude/latitude (drawn on the map) or on a survey grid
     cut: list[tuple[float, float]] = Field(default_factory=list, max_length=200)
     cut_epsg: int | None = Field(None, description="The grid the cut line's points are on; longitude/latitude when left out")
+    # subdivision into equal parts: the registry works out the cut lines (parallel strips along the bearing)
+    equal_n: int | None = Field(None, ge=2, le=20, description="Divide into this many equal-area parcels")
+    equal_bearing: float | None = Field(None, ge=0, lt=360, description="The bearing the equal strips are stacked along")
     # amalgamation: the neighbours merged with this parcel
     parcels: list[UUID] = Field(default_factory=list, max_length=50)
     register_now: bool = Field(False, description="Registrars: lodge and register at once")
@@ -261,6 +264,21 @@ def _need_feature(user, kind):
 
 
 # ---------- lodging, registering, rejecting ----------
+class EqualPartsIn(BaseModel):
+    n: int = Field(..., ge=2, le=20, description="How many equal-area parcels")
+    bearing: float = Field(90.0, ge=0, lt=360, description="The bearing the strips are stacked along")
+
+
+@router.post("/parcels/{parcel_id}/subdivision/equal-parts", summary="Preview an equal-area subdivision: the cut lines and the piece sizes")
+async def equal_parts_preview(parcel_id: UUID, body: EqualPartsIn, user=Depends(need("officer")), conn=Depends(get_conn)):
+    parcel = await _parcel(conn, user, parcel_id)
+    if parcel["status"] != "active":
+        raise Problem(409, "Only an active parcel can be subdivided.", code="not_active")
+    geom = await parcel_shape(conn, parcel_id)
+    lines, pcs = fabric.equal_parts(geom, body.n, body.bearing, await _parcel_epsg(conn, user, parcel_id))
+    return {"cuts": lines, "pieces": [fabric.describe(pc) for pc in pcs]}
+
+
 @router.post("/parcels/{parcel_id}/instruments", status_code=201, summary="Lodge an instrument against a parcel")
 async def lodge(parcel_id: UUID, body: LodgeIn, user=Depends(need("officer", write=True)), conn=Depends(get_conn)):
     _need_feature(user, body.kind)
@@ -296,14 +314,20 @@ async def lodge(parcel_id: UUID, body: LodgeIn, user=Depends(need("officer", wri
         d |= {"encumbrance_id": str(body.encumbrance_id),
               "encumbrance_label": f"the {e['kind']}" + (f" of {e['name']}" if e and e["name"] else "") if e else "an encumbrance"}
     if k == "subdivision":
-        cut = body.cut
-        if body.cut_epsg and body.cut_epsg != 4326:
-            if body.cut_epsg not in geodesy.GRIDS:
-                raise Problem(422, "Choose one of the survey grids listed.", code="validation", fields={"cut_epsg": ["unknown grid"]})
-            cut = geodesy.to_wgs84(cut, body.cut_epsg)
         geom = await parcel_shape(conn, parcel_id)
-        d |= {"cut": [[round(x, 9), round(y, 9)] for x, y in cut],
-              "pieces": [{"area_sqm": fabric.describe(pc)["area_sqm"]} for pc in fabric.pieces(geom, cut)]}
+        if body.equal_n:
+            epsg = await _parcel_epsg(conn, user, parcel_id)
+            lines, pcs = fabric.equal_parts(geom, body.equal_n, body.equal_bearing or 90.0, epsg)
+            d |= {"cuts": lines, "equal_n": body.equal_n, "equal_bearing": body.equal_bearing or 90.0,
+                  "pieces": [{"area_sqm": fabric.describe(pc)["area_sqm"]} for pc in pcs]}
+        else:
+            cut = body.cut
+            if body.cut_epsg and body.cut_epsg != 4326:
+                if body.cut_epsg not in geodesy.GRIDS:
+                    raise Problem(422, "Choose one of the survey grids listed.", code="validation", fields={"cut_epsg": ["unknown grid"]})
+                cut = geodesy.to_wgs84(cut, body.cut_epsg)
+            d |= {"cut": [[round(x, 9), round(y, 9)] for x, y in cut],
+                  "pieces": [{"area_sqm": fabric.describe(pc)["area_sqm"]} for pc in fabric.pieces(geom, cut)]}
     if k == "amalgamation":
         ids = [parcel_id] + [x for x in dict.fromkeys(body.parcels) if x != parcel_id]
         if len(ids) < 2:
@@ -521,6 +545,15 @@ async def parcel_shape(conn, parcel_id):
     cur = await conn.execute("SELECT ST_AsGeoJSON(geom, 10) AS g FROM parcels WHERE id = %s", (parcel_id,))
     import json
     return shape(json.loads((await cur.fetchone())["g"]))
+
+
+async def _parcel_epsg(conn, user, parcel_id) -> int:
+    """The grid to do planar geometry (equal-area splits) in: the parcel's own, else the organization's default."""
+    cur = await conn.execute("SELECT source_epsg FROM parcels WHERE id = %s AND org_id = %s", (parcel_id, user["org_id"]))
+    r = await cur.fetchone()
+    if r and r.get("source_epsg") and r["source_epsg"] in geodesy.GRIDS:
+        return r["source_epsg"]
+    return (await org_settings(conn, user))["default_epsg"]
 
 
 async def assess_fabric(conn, user, parcel, kind, d, ignore, problems, warnings):

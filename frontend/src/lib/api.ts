@@ -58,6 +58,7 @@ export const api = {
   register: (id: string) => req<Register>("GET", `/parcels/${id}/register`),
   kinds: () => req<Kinds>("GET", "/register/kinds"),
   lodge: (id: string, b: LodgeBody) => req<Instrument & { warnings?: string[] }>("POST", `/parcels/${id}/instruments`, b),
+  equalParts: (id: string, n: number, bearing: number) => req<EqualPartsPreview>("POST", `/parcels/${id}/subdivision/equal-parts`, { n, bearing }),
   instruments: (status = "lodged") => req<Instrument[]>("GET", `/instruments?status=${status}`),
   instrument: (id: string) => req<Instrument>("GET", `/instruments/${id}`),
   registerInstrument: (id: string, note = "") => req<Instrument>("POST", `/instruments/${id}/register`, { note }),
@@ -95,4 +96,6 @@ export interface LodgeBody {
   title_kind?: string; title_no?: string; purpose?: string; term_years?: number | null; starts_on?: string | null; ground_rent_ngn?: number | null;
   holders?: HolderData[]; party?: PartyIn; amount_ngn?: number | null; encumbrance_id?: string; register_now?: boolean;
   cut?: [number, number][]; cut_epsg?: number | null; parcels?: string[];
+  equal_n?: number; equal_bearing?: number;
 }
+export interface EqualPartsPreview { cuts: [number, number][][]; pieces: { area_sqm: number; perimeter_m: number; geometry: GeoJSON.Polygon }[] }

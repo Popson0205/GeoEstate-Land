@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import MapView from "../components/MapView";
 import { HoldersField, PartyField, blankParty } from "../components/Parties";
 import { Button, ErrorText, useToast } from "../components/ui";
-import { ApiError, api, type LodgeBody } from "../lib/api";
+import { ApiError, api, type EqualPartsPreview, type LodgeBody } from "../lib/api";
 import { ENC_NAME, LAND_USES } from "../lib/format";
 import type { HolderData, InstrumentKind, Me, PartyIn } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
@@ -28,6 +28,14 @@ export default function LodgePage({ me }: { me: Me }) {
   const [cut, setCut] = useState<[number, number][]>([]);
   const [cutText, setCutText] = useState("");
   const [drawing, setDrawing] = useState(true);
+  const [submethod, setSubmethod] = useState<"draw" | "bearing" | "equal">("draw");
+  const [bStart, setBStart] = useState("");           // the beacon the cut starts from (its seq), or "" for a typed point
+  const [bPoint, setBPoint] = useState("");           // a typed start point "lon, lat"
+  const [bearingStr, setBearingStr] = useState("");   // the cut's bearing, decimal or D M S
+  const [eqN, setEqN] = useState("2");
+  const [eqBearing, setEqBearing] = useState("90");
+  const [eqPreview, setEqPreview] = useState<EqualPartsPreview | null>(null);
+  const [eqBusy, setEqBusy] = useState(false);
   const [merge, setMerge] = useState<string[]>([]);
   const kinds = useLoad(() => api.kinds());
   const [kind, setKind] = useState<InstrumentKind | null>((params.get("kind") as InstrumentKind) || null);
@@ -59,6 +67,36 @@ export default function LodgePage({ me }: { me: Me }) {
   };
   const set = (key: keyof typeof f, v: string) => setF({ ...f, [key]: v });
 
+  // A bearing is accepted as a decimal (113.8) or as degrees-minutes(-seconds) (113 48 or 113°48′).
+  const parseBearing = (s: string): number | null => {
+    const parts = s.trim().split(/[\s°'"′″:]+/).filter(Boolean).map(Number);
+    if (!parts.length || parts.some(Number.isNaN)) return null;
+    const deg = (parts[0] ?? 0) + (parts[1] ?? 0) / 60 + (parts[2] ?? 0) / 3600;
+    return deg >= 0 && deg < 360 ? deg : null;
+  };
+  // The cut line from a start point along a bearing, extended well past the parcel so it cuts clean through (lon/lat).
+  const bearingCutLine = (): [number, number][] | null => {
+    const brg = parseBearing(bearingStr);
+    if (brg == null) return null;
+    let start: [number, number] | null = null;
+    if (bStart) { const bc = parcel.data?.beacons.find((b) => String(b.seq) === bStart); if (bc) start = [bc.lon, bc.lat]; }
+    else { const p = bPoint.split(/[\s,;]+/).map(Number).filter((x) => !Number.isNaN(x)); if (p.length >= 2) start = [p[0], p[1]]; }
+    if (!start) return null;
+    const lat0 = (start[1] * Math.PI) / 180, mLon = 111320 * Math.cos(lat0), mLat = 110540, span = 3000;
+    const b = (brg * Math.PI) / 180, dE = Math.sin(b), dN = Math.cos(b);
+    return [[start[0] - (dE * span) / mLon, start[1] - (dN * span) / mLat], [start[0] + (dE * span) / mLon, start[1] + (dN * span) / mLat]];
+  };
+  const bLine = k === "subdivision" && submethod === "bearing" ? bearingCutLine() : null;
+  const eqFC: GeoJSON.FeatureCollection | null = eqPreview
+    ? { type: "FeatureCollection", features: eqPreview.pieces.map((p, i) => ({ type: "Feature", geometry: p.geometry, properties: { i } })) } : null;
+  const previewEqual = async () => {
+    const brg = parseBearing(eqBearing); if (brg == null) { setProblems(["Give the direction to divide along as a bearing."]); return; }
+    setEqBusy(true); setErr(null); setProblems([]);
+    try { setEqPreview(await api.equalParts(id, Number(eqN), brg)); }
+    catch (e) { setEqPreview(null); setErr(e); }
+    finally { setEqBusy(false); }
+  };
+
   const submit = async () => {
     if (!k) return;
     const b: LodgeBody = { kind: k, instrument_date: f.instrument_date || null, reference: f.reference, details: f.details,
@@ -69,8 +107,17 @@ export default function LodgePage({ me }: { me: Me }) {
     if (k === "mortgage" || k === "caveat" || k === "lease") Object.assign(b, { party, amount_ngn: num(f.amount_ngn), term_years: k === "lease" ? num(f.term_years) : null });
     if (k === "discharge") b.encumbrance_id = f.encumbrance_id;
     if (k === "subdivision") {
-      const g = gridCut();
-      if (g) Object.assign(b, { cut: g, cut_epsg: parcel.data?.source_epsg ?? null }); else b.cut = cut;
+      if (submethod === "equal") {
+        if (!eqPreview) { setProblems(["Preview the equal split first."]); return; }
+        Object.assign(b, { equal_n: Number(eqN), equal_bearing: parseBearing(eqBearing) ?? 90 });
+      } else if (submethod === "bearing") {
+        const ln = bearingCutLine();
+        if (!ln) { setProblems(["Choose a start beacon (or point) and a bearing for the cut."]); return; }
+        b.cut = ln;
+      } else {
+        const g = gridCut();
+        if (g) Object.assign(b, { cut: g, cut_epsg: parcel.data?.source_epsg ?? null }); else b.cut = cut;
+      }
     }
     if (k === "amalgamation") b.parcels = merge;
     setBusy(true); setErr(null); setProblems([]);
@@ -126,18 +173,54 @@ export default function LodgePage({ me }: { me: Me }) {
             </div>
           </>}
           {k === "subdivision" && <>
-            <p className="ge-small ge-muted" style={{ margin: 0 }}>Draw the cut line across the parcel: click on the map where it starts outside the
-              boundary, at each bend, and where it ends outside the boundary. Or give its points on the survey grid below.</p>
-            <MapView fabric={fabricData.data} focus={parcel.data?.geometry} line={cut} fit={false} height={360} label="Draw the cut line"
-              onMapClick={drawing ? (c) => setCut((x) => [...x, c]) : undefined} />
-            <div className="actions">
-              <span className="ge-small">{cut.length ? `${cut.length} point${cut.length === 1 ? "" : "s"} on the line` : "No line yet"}</span>
-              <Button small onClick={() => setCut((x) => x.slice(0, -1))} disabled={!cut.length}>Undo the last point</Button>
-              <Button small variant="ghost" onClick={() => setCut([])} disabled={!cut.length}>Clear</Button>
-              <label className="ge-small actions"><input type="checkbox" checked={drawing} onChange={(e) => setDrawing(e.target.checked)} /> Drawing</label>
+            <div className="seg" role="group" aria-label="How to subdivide">
+              {([["draw", "Draw a line"], ["bearing", "By bearing"], ["equal", "Equal parts"]] as const).map(([v, lbl]) => (
+                <button key={v} type="button" aria-pressed={submethod === v}
+                  onClick={() => { setSubmethod(v); setEqPreview(null); }}>{lbl}</button>))}
             </div>
-            <div className="ge-field"><label htmlFor="cutgrid">…or the cut line's points on {parcel.data?.grid_name.split(" (")[0] ?? "the survey grid"} (easting, northing; one per line)</label>
-              <textarea id="cutgrid" className="mono" value={cutText} onChange={(e) => setCutText(e.target.value)} placeholder={"331020, 992990\n331020, 993060"} /></div>
+            {submethod === "draw" && <>
+              <p className="ge-small ge-muted" style={{ margin: 0 }}>Draw the cut line across the parcel: click on the map where it starts outside the
+                boundary, at each bend, and where it ends outside the boundary. Or give its points on the survey grid below.</p>
+              <MapView fabric={fabricData.data} focus={parcel.data?.geometry} line={cut} fit={false} height={360} label="Draw the cut line"
+                onMapClick={drawing ? (c) => setCut((x) => [...x, c]) : undefined} />
+              <div className="actions">
+                <span className="ge-small">{cut.length ? `${cut.length} point${cut.length === 1 ? "" : "s"} on the line` : "No line yet"}</span>
+                <Button small onClick={() => setCut((x) => x.slice(0, -1))} disabled={!cut.length}>Undo the last point</Button>
+                <Button small variant="ghost" onClick={() => setCut([])} disabled={!cut.length}>Clear</Button>
+                <label className="ge-small actions"><input type="checkbox" checked={drawing} onChange={(e) => setDrawing(e.target.checked)} /> Drawing</label>
+              </div>
+              <div className="ge-field"><label htmlFor="cutgrid">…or the cut line's points on {parcel.data?.grid_name.split(" (")[0] ?? "the survey grid"} (easting, northing; one per line)</label>
+                <textarea id="cutgrid" className="mono" value={cutText} onChange={(e) => setCutText(e.target.value)} placeholder={"331020, 992990\n331020, 993060"} /></div>
+            </>}
+            {submethod === "bearing" && <>
+              <p className="ge-small ge-muted" style={{ margin: 0 }}>The cut runs from a beacon (or a point) along a bearing, straight across the parcel.</p>
+              <div className="two-col">
+                <div className="ge-field"><label htmlFor="bstart">Start from</label>
+                  <select id="bstart" value={bStart} onChange={(e) => setBStart(e.target.value)}>
+                    <option value="">A point I type</option>
+                    {parcel.data?.beacons.map((bc) => <option key={bc.seq} value={bc.seq}>{bc.name}</option>)}
+                  </select></div>
+                <div className="ge-field"><label htmlFor="bbrg">Bearing</label>
+                  <input id="bbrg" value={bearingStr} onChange={(e) => setBearingStr(e.target.value)} placeholder="113 48  or  113.8" /></div>
+              </div>
+              {!bStart && <div className="ge-field"><label htmlFor="bpt">Start point (longitude, latitude)</label>
+                <input id="bpt" className="mono" value={bPoint} onChange={(e) => setBPoint(e.target.value)} placeholder="4.5601, 7.7702" /></div>}
+              <MapView fabric={fabricData.data} focus={parcel.data?.geometry} line={bLine ?? []} fit={false} height={360} label="The cut line" />
+              <p className="ge-small">{bLine ? "The line will be snapped to the boundary where it crosses." : "Enter a start and bearing to see the cut."}</p>
+            </>}
+            {submethod === "equal" && <>
+              <p className="ge-small ge-muted" style={{ margin: 0 }}>Divide the parcel into equal-area parcels as parallel strips. Choose how many, and the
+                bearing the strips are stacked along (90° splits east–west, 0° north–south).</p>
+              <div className="two-col">
+                <div className="ge-field"><label htmlFor="eqn">Number of parcels</label>
+                  <input id="eqn" type="number" min={2} max={20} value={eqN} onChange={(e) => { setEqN(e.target.value); setEqPreview(null); }} /></div>
+                <div className="ge-field"><label htmlFor="eqb">Stack along bearing</label>
+                  <input id="eqb" value={eqBearing} onChange={(e) => { setEqBearing(e.target.value); setEqPreview(null); }} placeholder="90" /></div>
+              </div>
+              <div className="actions"><Button small busy={eqBusy} onClick={() => void previewEqual()}>Preview the split</Button>
+                {eqPreview && <span className="ge-small">{eqPreview.pieces.length} parcels · {eqPreview.pieces.map((p) => `${p.area_sqm.toLocaleString("en-NG", { maximumFractionDigits: 0 })} m²`).join(" · ")}</span>}</div>
+              <MapView fabric={fabricData.data} focus={parcel.data?.geometry} preview={eqFC} fit={false} height={360} label="The equal parts" />
+            </>}
           </>}
           {k === "amalgamation" && (
             <fieldset className="holder">
