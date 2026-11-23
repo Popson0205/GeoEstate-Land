@@ -49,16 +49,18 @@ export default function PlanDrawing({ beacons, className }: { beacons: Beacon[];
 
   const legs = S.map((a, i) => {
     const b = S[(i + 1) % S.length], w = pts[i], w2 = pts[(i + 1) % S.length];
-    const dist = Math.hypot(w2.x - w.x, w2.y - w.y);
+    const dist = `${Math.hypot(w2.x - w.x, w2.y - w.y).toFixed(2)} m`;
     const brg = bearing(w2.x - w.x, w2.y - w.y);
-    // Label at the leg's midpoint, rotated along the leg and kept upright, nudged to the outer side.
+    // Labels sit at the leg's midpoint, rotated along the leg and kept upright. The distance goes just inside the
+    // boundary, the bearing just outside — the way a survey plan reads.
     const mx = (a.sx + b.sx) / 2, my = (a.sy + b.sy) / 2;
     let ang = (Math.atan2(b.sy - a.sy, b.sx - a.sx) * 180) / Math.PI;
     if (ang > 90 || ang < -90) ang += 180;
-    const nx = -(b.sy - a.sy), ny = b.sx - a.sx, nl = Math.hypot(nx, ny) || 1; // normal
-    const out = (mx - cx) * (nx / nl) + (my - cy) * (ny / nl) >= 0 ? 1 : -1; // push away from centre
-    return { key: i, mx: mx + (nx / nl) * 13 * out, my: my + (ny / nl) * 13 * out, ang,
-      label: `${dist.toFixed(2)} m · ${brg}` };
+    const nx = -(b.sy - a.sy), ny = b.sx - a.sx, nl = Math.hypot(nx, ny) || 1, ux = nx / nl, uy = ny / nl;
+    const out = (mx - cx) * ux + (my - cy) * uy >= 0 ? 1 : -1;   // +1 points away from the centre
+    return { key: i, ang, brg, dist,
+      bx: mx + ux * 13 * out, by: my + uy * 13 * out,            // bearing: outside
+      dx: mx - ux * 12 * out, dy: my - uy * 12 * out };          // distance: inside
   });
 
   return (
@@ -66,8 +68,10 @@ export default function PlanDrawing({ beacons, className }: { beacons: Beacon[];
       xmlns="http://www.w3.org/2000/svg" style={{ width: "100%", height: "auto", maxWidth: W }}>
       <polygon points={ring} fill="rgba(47,138,52,0.08)" stroke="#1b2b5e" strokeWidth={1.6} strokeLinejoin="round" />
       {legs.map((l) => (
-        <text key={l.key} x={l.mx} y={l.my} transform={`rotate(${l.ang.toFixed(1)} ${l.mx} ${l.my})`}
-          textAnchor="middle" dominantBaseline="middle" fontSize={11} fill="#1b2b5e" fontFamily="system-ui, sans-serif">{l.label}</text>
+        <g key={l.key} fill="#1b2b5e" fontFamily="system-ui, sans-serif" fontSize={10.5}>
+          <text x={l.dx} y={l.dy} transform={`rotate(${l.ang.toFixed(1)} ${l.dx} ${l.dy})`} textAnchor="middle" dominantBaseline="middle">{l.dist}</text>
+          <text x={l.bx} y={l.by} transform={`rotate(${l.ang.toFixed(1)} ${l.bx} ${l.by})`} textAnchor="middle" dominantBaseline="middle">{l.brg}</text>
+        </g>
       ))}
       {S.map((p, i) => (
         <g key={i}>
