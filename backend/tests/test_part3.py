@@ -86,7 +86,7 @@ def test_subdivision_and_amalgamation(client, person):
     k1 = ada.get(f"/parcels/{kids[0]['id']}").json()
     assert k1["parents"][0]["pin"] == p["pin"] and k1["address"].startswith("Plot 9 (part 1 of 2") and k1["locality"] == "Kubwa"
     names = [b["name"] for b in k1["beacons"]]
-    assert "N1" in names and len({"A", "B", "C", "D"} & set(names)) == 2
+    assert names == [f"N{i + 1}" for i in range(len(names))] and len(names) >= 3   # sequential, no repeats
     reg1 = ada.get(f"/parcels/{kids[0]['id']}/register").json()
     assert [h["name"] for h in reg1["holders"]] == ["Ifeoma Nwosu"] and [e["party_name"] for e in reg1["encumbrances"]] == ["First Bank"]
     assert reg1["title"]["term_years"] == 99 and reg1["title"]["ends_on"] == "2119-01-01" and float(reg1["title"]["ground_rent_ngn"]) == 15000
