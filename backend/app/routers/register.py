@@ -13,6 +13,7 @@ is checked twice: when lodged, and again when registered, since the register may
   discharge   ends one mortgage, caveat or lease
   revocation  ends the title (and everything on it); the parcel can then be granted again
 """
+import logging
 from datetime import date
 from fractions import Fraction
 from typing import Literal
@@ -458,7 +459,14 @@ async def _register(conn, user, iid, note: str, auto: bool = False) -> dict:
     elif k == "discharge":
         await conn.execute("UPDATE encumbrances SET to_instrument = %s WHERE id = %s AND to_instrument IS NULL", (iid, d["encumbrance_id"]))
     elif k in FABRIC:
-        await apply_fabric(conn, user, ins, parcel, k, d)
+        try:
+            await apply_fabric(conn, user, ins, parcel, k, d)
+        except Problem:
+            raise
+        except Exception:                                    # a geometry/code failure must not leave a raw 500
+            logging.getLogger("register").exception("apply_fabric failed for %s", ins["number"])
+            raise Problem(409, f"{ins['number']} could not be applied to the map automatically. It is still lodged — try registering it "
+                               "again once this is looked into, or reject it and re-lodge.", code="apply_failed")
     elif k == "revocation":
         await conn.execute("UPDATE titles SET status = 'revoked', ended_by = %s WHERE id = %s", (iid, t["id"]))
         await conn.execute("UPDATE holdings SET to_instrument = %s WHERE title_id = %s AND to_instrument IS NULL", (iid, t["id"]))
