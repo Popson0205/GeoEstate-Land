@@ -48,6 +48,11 @@ export function applyOrgBrand(brand: OrgBrand | null | undefined): void {
     setThemeColor("#1b2b5e");
   }
   document.title = brandName(brand) ?? "Land Registry";
+  // Remember a real client brand so the launch splash (which runs before sign-in) can show it next time.
+  try {
+    const nm = brandName(brand);
+    if (nm || brand?.color) localStorage.setItem("ge-brand", JSON.stringify({ name: nm, color: brand?.color ?? null, logo_url: brand?.logo_url ?? null }));
+  } catch { /* storage unavailable */ }
 }
 
 const THEME_META_ID = "brand-theme-color";
