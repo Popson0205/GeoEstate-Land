@@ -19,7 +19,7 @@ export default function ExtractPage({ me }: { me: Me }) {
     <>
       <div className="head no-print"><Link to={`/parcels/${id}`}>Back to the parcel</Link><button className="ge-btn ge-btn-primary" onClick={() => window.print()}>Print or save as PDF</button></div>
       <article className="extract">
-        <header><img src="/logo.png" alt="" /><div><h1>Extract of the land register</h1><div className="ge-muted">{me.org_name}</div></div></header>
+        <header><img src={me.org_brand?.seal_url || me.org_brand?.logo_url || "/logo.png"} alt="" /><div><h1>Extract of the land register</h1><div className="ge-muted">{me.org_name}</div></div></header>
         <h2>A. The property</h2>
         <dl className="facts">
           <dt>Parcel (PIN)</dt><dd>{x.pin}{x.status === "retired" && " (retired)"}</dd>
@@ -35,7 +35,7 @@ export default function ExtractPage({ me }: { me: Me }) {
         {pending.length > 0 && <><h2>Dealings lodged and not yet registered</h2>
           <ul>{pending.map((i) => <li key={i.id}>{i.number}: {i.kind_name}, lodged {day(i.lodged_at)}</li>)}</ul></>}
         <p className="foot">Issued {when(new Date().toISOString())} by {me.name}, {me.org_name}. This extract shows the register at the moment it was issued; check
-          it again before relying on it. GeoEstate Land Registry.</p>
+          it again before relying on it. {me.org_brand?.name || "GeoEstate Land Registry"}.</p>
       </article>
     </>
   );
