@@ -11,16 +11,18 @@ import "maplibre-gl/dist/maplibre-gl.css";
 //   VITE_BASEMAP_*_ATTRIBUTION                    — the credit line the provider requires
 //   VITE_MAP_MAX_ZOOM                             — how far in the map lets you zoom (default 22, ~sub-metre)
 const env = import.meta.env;
-const STREETS = env.VITE_BASEMAP_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
-const IMAGERY = env.VITE_BASEMAP_IMAGERY_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+// Google map tiles (road for "Map", hybrid = satellite + labels for "Satellite"); the four mt subdomains share load.
+const google = (lyrs: string) => ["mt0", "mt1", "mt2", "mt3"].map((h) => `https://${h}.google.com/vt/lyrs=${lyrs}&x={x}&y={y}&z={z}`);
+const STREETS = env.VITE_BASEMAP_URL ? [env.VITE_BASEMAP_URL] : google("m");
+const IMAGERY = env.VITE_BASEMAP_IMAGERY_URL ? [env.VITE_BASEMAP_IMAGERY_URL] : google("y");
 const num = (v: unknown, d: number) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
-const STREETS_MAXZOOM = num(env.VITE_BASEMAP_STREETS_MAXZOOM, 19);
-const IMAGERY_MAXZOOM = num(env.VITE_BASEMAP_IMAGERY_MAXZOOM, 20);
+const STREETS_MAXZOOM = num(env.VITE_BASEMAP_STREETS_MAXZOOM, 20);
+const IMAGERY_MAXZOOM = num(env.VITE_BASEMAP_IMAGERY_MAXZOOM, 21);
 const MAX_ZOOM = num(env.VITE_MAP_MAX_ZOOM, 22);
 const FIT_MAX_ZOOM = num(env.VITE_MAP_FIT_MAX_ZOOM, 20);
 const credit = (u: string, override?: string) => override
-  || (/arcgis|esri/i.test(u) ? "Esri, Maxar, Earthstar Geographics, HERE, Garmin, © OpenStreetMap contributors"
-    : /google/i.test(u) ? "© Google" : "© OpenStreetMap contributors");
+  || (/google/i.test(u) ? "© Google" : /arcgis|esri/i.test(u) ? "Esri, Maxar, Earthstar Geographics, HERE, Garmin, © OpenStreetMap contributors"
+    : "© OpenStreetMap contributors");
 type Base = "streets" | "imagery";
 const SAVED = "land.basemap";
 const NAVY = "#1b2b5e", GREEN = "#2f8a34", RED = "#b42318", AMBER = "#b07800";
@@ -83,8 +85,8 @@ export default function MapView({ fabric, focus, preview, previewOk = true, onSe
     const m = new maplibregl.Map({
       container: el.current, attributionControl: { compact: true },
       style: { version: 8, glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-        sources: { base: { type: "raster", tiles: [STREETS], tileSize: 256, attribution: credit(STREETS, env.VITE_BASEMAP_STREETS_ATTRIBUTION), maxzoom: STREETS_MAXZOOM },
-          imagery: { type: "raster", tiles: [IMAGERY], tileSize: 256, attribution: credit(IMAGERY, env.VITE_BASEMAP_IMAGERY_ATTRIBUTION), maxzoom: IMAGERY_MAXZOOM } },
+        sources: { base: { type: "raster", tiles: STREETS, tileSize: 256, attribution: credit(STREETS[0], env.VITE_BASEMAP_STREETS_ATTRIBUTION), maxzoom: STREETS_MAXZOOM },
+          imagery: { type: "raster", tiles: IMAGERY, tileSize: 256, attribution: credit(IMAGERY[0], env.VITE_BASEMAP_IMAGERY_ATTRIBUTION), maxzoom: IMAGERY_MAXZOOM } },
         layers: [{ id: "base", type: "raster", source: "base", layout: { visibility: baseRef.current === "streets" ? "visible" : "none" } },
           { id: "imagery", type: "raster", source: "imagery", layout: { visibility: baseRef.current === "imagery" ? "visible" : "none" } }] },
       center: [8.0, 9.0], zoom: 5.2, maxZoom: MAX_ZOOM,
