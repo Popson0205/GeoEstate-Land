@@ -28,6 +28,7 @@ export interface ParcelRow {
   notes: string; method: string; source_epsg: number; closure_error_m: string | null; closure_ratio: number | null; closed_to_start?: ClosedToStart | null; survey_plan_no: string;
   surveyor: string; survey_date: string | null; retired_reason: string | null; created_by_name: string; created_at: string; updated_at: string;
   lon: number; lat: number; title_no: string | null;
+  parents?: { id: string; pin: string; kind: string }[]; children?: { id: string; pin: string; kind: string }[];
 }
 export interface Parcel extends ParcelRow {
   geometry: GeoJSON.Polygon; grid_name: string; beacons: Beacon[]; neighbours: { id: string; pin: string; land_use: string }[];

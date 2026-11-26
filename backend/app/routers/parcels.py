@@ -242,7 +242,13 @@ async def check_parcel(body: CaptureIn, user=Depends(need("officer")), conn=Depe
 PARCEL_SQL = ("SELECT p.id, p.pin, p.status, p.decided_by_name, p.decided_at, p.decision_note, p.correction, p.area_sqm, p.perimeter_m, p.land_use, p.address, p.locality, p.notes, p.method, "
               "  p.source_epsg, p.closure_error_m, p.closure_ratio, p.closed_to_start, p.survey_plan_no, p.surveyor, p.survey_date, p.retired_reason, "
               "  p.created_by_name, p.created_at, p.updated_at, ST_X(ST_Centroid(p.geom)) AS lon, ST_Y(ST_Centroid(p.geom)) AS lat, "
-              "  (SELECT t.title_no FROM titles t WHERE t.parcel_id = p.id AND t.status = 'current') AS title_no "
+              "  (SELECT t.title_no FROM titles t WHERE t.parcel_id = p.id AND t.status = 'current') AS title_no, "
+              "  COALESCE((SELECT json_agg(json_build_object('id', x.id, 'pin', x.pin, 'kind', i.kind) ORDER BY x.pin) "
+              "            FROM lineage l JOIN parcels x ON x.id = l.parent_id JOIN instruments i ON i.id = l.instrument_id "
+              "            WHERE l.child_id = p.id), '[]') AS parents, "
+              "  COALESCE((SELECT json_agg(json_build_object('id', x.id, 'pin', x.pin, 'kind', i.kind) ORDER BY x.pin) "
+              "            FROM lineage l JOIN parcels x ON x.id = l.child_id JOIN instruments i ON i.id = l.instrument_id "
+              "            WHERE l.parent_id = p.id), '[]') AS children "
               "FROM parcels p ")
 
 
