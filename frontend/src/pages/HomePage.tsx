@@ -6,6 +6,27 @@ import { area, day } from "../lib/format";
 import type { Me, ParcelRow } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 
+const lineageVerb = (kind: string, dir: "to" | "from") =>
+  kind === "amalgamation" ? (dir === "to" ? "Amalgamated into" : "Amalgamated from")
+                          : (dir === "to" ? "Subdivided into" : "Subdivided out of");
+
+/** The parent↔child trail shown under a parcel in the register, so a split or merge is
+ *  visible without opening each parcel. A retired parent reads "Subdivided into …"; a new
+ *  parcel reads "Subdivided out of …". */
+function Lineage({ p }: { p: ParcelRow }) {
+  const kids = p.children ?? [], pars = p.parents ?? [];
+  if (!kids.length && !pars.length) return null;
+  const links = (arr: { id: string; pin: string }[]) =>
+    arr.map((r, i) => <span key={r.id}>{i > 0 ? ", " : ""}<Link to={`/parcels/${r.id}`} onClick={(e) => e.stopPropagation()}>{r.pin}</Link></span>);
+  return (
+    <div className="ge-small ge-muted" style={{ marginTop: 2 }}>
+      {kids.length > 0 && <>{lineageVerb(kids[0].kind, "to")} {links(kids)}.</>}
+      {kids.length > 0 && pars.length > 0 ? " " : ""}
+      {pars.length > 0 && <>{lineageVerb(pars[0].kind, "from")} {links(pars)}.</>}
+    </div>
+  );
+}
+
 export function ParcelTable({ rows, empty }: { rows: ParcelRow[]; empty: string }) {
   const go = useNavigate();
   if (!rows.length) return <p className="empty">{empty}</p>;
@@ -20,7 +41,7 @@ export function ParcelTable({ rows, empty }: { rows: ParcelRow[]; empty: string 
                 {p.status !== "active" && <> <span className={`ge-badge ${p.status === "pending" ? "ge-badge-warn" : "ge-badge-bad"}`}>
                   {{ pending: "Waiting", retired: "Retired", rejected: "Rejected", active: "" }[p.status]}</span></>}</td>
               <td>{p.title_no ?? <span className="ge-muted">—</span>}</td>
-              <td>{[p.address, p.locality].filter(Boolean).join(", ") || <span className="ge-muted">—</span>}</td>
+              <td>{[p.address, p.locality].filter(Boolean).join(", ") || <span className="ge-muted">—</span>}<Lineage p={p} /></td>
               <td>{p.land_use || <span className="ge-muted">—</span>}</td>
               <td className="num">{area(p.area_sqm)}</td>
               <td>{p.survey_plan_no || <span className="ge-muted">—</span>}</td>
