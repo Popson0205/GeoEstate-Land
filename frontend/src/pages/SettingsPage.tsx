@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import AboutCard from "../components/AboutCard";
 import { Button, ErrorText, useAction } from "../components/ui";
 import WorkflowCard from "../components/WorkflowCard";
 import { api } from "../lib/api";
@@ -14,7 +15,7 @@ export default function SettingsPage({ me }: { me: Me }) {
   const [f, setF] = useState({ default_epsg: 26332, pin_prefix: "", closure_ratio: 5000, overlap_tolerance_sqm: 1, title_prefix: "", public_lookup: "off" });
   useEffect(() => { if (s.data) setF({ default_epsg: s.data.default_epsg, pin_prefix: s.data.pin_prefix, closure_ratio: s.data.closure_ratio,
     overlap_tolerance_sqm: s.data.overlap_tolerance_sqm, title_prefix: s.data.title_prefix, public_lookup: s.data.public_lookup }); }, [s.data]);
-  if (me.role !== "registrar") return <section className="ge-card"><h1>Settings</h1><p>Only registrars can change the settings.</p></section>;
+  if (me.role !== "registrar") return <><h1>Settings</h1><section className="ge-card"><p>Only registrars can change the settings.</p></section><AboutCard me={me} appName="Land Registry" /></>;
   const save = async () => {
     const got = await run("save", () => api.saveSettings({ ...f, pin_prefix: f.pin_prefix.trim().toUpperCase(), title_prefix: f.title_prefix.trim().toUpperCase() }), "Settings saved");
     if (got) s.setData(got);
@@ -64,6 +65,7 @@ export default function SettingsPage({ me }: { me: Me }) {
           are known, Land Registry corrects every survey captured on that grid.</p>
         <Link className="ge-btn" to="/settings/control">Control points and corrections</Link>
       </section>
+      <AboutCard me={me} appName="Land Registry" />
     </>
   );
 }
