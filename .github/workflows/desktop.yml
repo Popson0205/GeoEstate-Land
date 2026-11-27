@@ -1,0 +1,72 @@
+name: Desktop (Windows installer)
+
+# Builds the Land Registry Windows installer (.exe). It runs automatically on every push to main — the installer is
+# uploaded as a run artifact and published to a rolling "desktop-latest" pre-release so there's always a one-click
+# download. It also runs on desktop pull requests (to catch build breaks early), can be run by hand
+# (workflow_dispatch), and on a "desktop-v1.0.0" tag it attaches the installer to that version's Release.
+#
+# The installer is code-signed automatically when a signing certificate is configured in the repository secrets
+# (see desktop/SIGNING.md); with no secrets set it builds unsigned.
+on:
+  push:
+    branches: [main]
+    tags: ["desktop-v*"]
+  pull_request:
+    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build .exe (windows-latest)
+    runs-on: windows-latest
+    defaults: { run: { working-directory: desktop } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm, cache-dependency-path: desktop/package-lock.json }
+      - name: Install
+        run: npm ci
+      - name: Build installer
+        run: npm run dist
+        env:
+          # Code signing — see desktop/SIGNING.md. When none of these are set, the build is simply unsigned.
+          # 1) Azure Trusted Signing (recommended for CI; EV-level SmartScreen trust, no hardware token):
+          AZURE_CODE_SIGNING_ENDPOINT: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          AZURE_CODE_SIGNING_ACCOUNT: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          AZURE_CODE_SIGNING_PROFILE: ${{ secrets.AZURE_CODE_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # 2) Certificate file (.pfx / .p12) — OV or exportable cert:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+          # Optional, shared by both routes:
+          WINDOWS_PUBLISHER_NAME: ${{ secrets.WINDOWS_PUBLISHER_NAME }}
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LandRegistry-Windows-installer
+          path: |
+            desktop/release/*.exe
+            desktop/release/latest.yml
+          if-no-files-found: error
+      - name: Publish rolling "latest" installer (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-latest
+          name: Land Registry Desktop (latest)
+          body: Latest Land Registry Windows installer, built automatically from main. It is code-signed when a signing certificate is configured in the repository secrets (see desktop/SIGNING.md); if none is set yet, the build is unsigned and Windows SmartScreen may warn on first run (More info → Run anyway).
+          prerelease: true
+          make_latest: false
+          files: desktop/release/*.exe
+      - name: Attach to release (on version tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/release/*.exe
+            desktop/release/latest.yml
